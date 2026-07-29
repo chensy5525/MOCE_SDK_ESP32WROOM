@@ -9,9 +9,9 @@ supported_boards:
 architecture: esp32_wroom_to_ch32_gateway
 gateway_required: true
 component_paths:
-  - components_esp32wroom/ch32_oled_gateway
+  - components/ch32_oled_gateway
 example_paths:
-  - example_final/oled_ch32_gateway_test
+  - example/oled_ch32_test
 protocol_contracts:
   - docs/context/protocols/ch32_oled_gateway.md
 hardware_interface: can_gateway
@@ -30,8 +30,8 @@ unsupported:
   - Reading display memory or confirming the pixels physically visible on the panel.
   - Arbitrary fonts, graphics, or Unicode text without additional ESP32-side rendering data.
 user_phrases:
-  - 让 ESP32 通过 CH32 控制 OLED
-  - 在 OLED 上显示 Hello World
+  - �?ESP32 通过 CH32 控制 OLED
+  - �?OLED 上显�?Hello World
   - 通过 CAN 把显示数据转发给 CH32
 failure_policy: retry
 safe_defaults:

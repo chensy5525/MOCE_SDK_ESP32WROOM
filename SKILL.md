@@ -57,8 +57,8 @@ Do not submit only one large mixed demo. A complex kit can have a composition re
 
 Prefer these paths unless the repository already has a stronger convention:
 
-- ESP32-WROOM gateway helper component: `components_esp32wroom/<gateway_or_capability_id>/`
-- ESP32-WROOM minimal example: `example_esp32wroom/<recipe_id>/`
+- ESP32-WROOM gateway helper component: `components/<gateway_or_capability_id>/`
+- ESP32-WROOM minimal example: `example/<recipe_id>/`
 - Module context: `docs/context/modules/<module_id>.md`
 - Recipe context: `docs/context/examples/<recipe_id>.md`
 - CH32 protocol contract: `docs/context/protocols/<protocol_id>.md`

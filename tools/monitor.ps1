@@ -15,7 +15,7 @@ function Invoke-Idf {
 }
 
 if ([string]::IsNullOrWhiteSpace($ProjectDir)) {
-    $ProjectDir = Join-Path $SdkRoot "examples/blink_minimal"
+    $ProjectDir = Join-Path $SdkRoot "example/final_test"
 }
 $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
 

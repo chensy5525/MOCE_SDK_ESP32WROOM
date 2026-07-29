@@ -2,7 +2,7 @@
 set -e
 
 SDK_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-PROJECT_DIR=${1:-"$SDK_ROOT/examples/blink_minimal"}
+PROJECT_DIR=${1:-"$SDK_ROOT/example/final_test"}
 PROJECT_DIR=$(cd "$PROJECT_DIR" && pwd)
 TARGET=${2:-esp32}
 BOARD=${3:-my_board_$TARGET}

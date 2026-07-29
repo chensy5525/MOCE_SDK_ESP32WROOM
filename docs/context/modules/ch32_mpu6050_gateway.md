@@ -9,9 +9,9 @@ supported_boards:
 architecture: esp32_wroom_to_ch32_gateway
 gateway_required: true
 component_paths:
-  - components_esp32wroom/ch32_mpu6050_gateway
+  - components/ch32_mpu6050_gateway
 example_paths:
-  - example_final/mpu6050_ch32_gateway_test
+  - example/mpu6050_ch32_test
 protocol_contracts:
   - docs/context/protocols/ch32_mpu6050_gateway.md
 hardware_interface: can_gateway
@@ -31,9 +31,9 @@ unsupported:
   - DMP firmware, quaternion output, attitude calculation, or sensor fusion.
   - Calibrated motion measurements, FIFO streaming, or interrupt-driven sampling.
 user_phrases:
-  - 让 ESP32 通过 CH32 读取 MPU6050
-  - 每 500 毫秒读取一次加速度和陀螺仪
-  - 通过 CAN 获取 MPU6050 温度和运动数据
+  - �?ESP32 通过 CH32 读取 MPU6050
+  - �?500 毫秒读取一次加速度和陀螺仪
+  - 通过 CAN 获取 MPU6050 温度和运动数�?
 failure_policy: retry
 safe_defaults:
   - Wait for the CH32 HELLO frame before accessing the sensor.

@@ -9,9 +9,9 @@ supported_boards:
 architecture: esp32_wroom_to_ch32_gateway
 gateway_required: true
 component_paths:
-  - components_esp32wroom/ch32_syn6288_gateway
+  - components/ch32_syn6288_gateway
 example_paths:
-  - example_final/syn6288_ch32_gateway_test
+  - example/syn6288_ch32_test
 protocol_contracts:
   - docs/context/protocols/ch32_syn6288_gateway.md
 hardware_interface: can_gateway
@@ -31,9 +31,9 @@ unsupported:
   - SYN6288E Ready, Busy, playback-complete, or other UART receive feedback.
   - Concurrent speech transfers.
 user_phrases:
-  - 让 ESP32 通过 CH32 控制 SYN6288E 播放语音
-  - 通过 CAN 把完整语音帧转发到 SYN6288E
-  - 让 SYN6288E 播放宇音天下
+  - �?ESP32 通过 CH32 控制 SYN6288E 播放语音
+  - 通过 CAN 把完整语音帧转发�?SYN6288E
+  - �?SYN6288E 播放宇音天下
 failure_policy: warn
 safe_defaults:
   - Allow only one active transfer.

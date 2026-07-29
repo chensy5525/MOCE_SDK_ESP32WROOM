@@ -2,7 +2,7 @@
 set -e
 
 SDK_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-PROJECT_DIR=${1:-"$SDK_ROOT/examples/blink_minimal"}
+PROJECT_DIR=${1:-"$SDK_ROOT/example/final_test"}
 PORT=${2:-/dev/ttyUSB0}
 DURATION=${3:-0}
 

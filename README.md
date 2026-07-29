@@ -12,7 +12,7 @@
 │   ├── driver_*             # LED/Button/Servo/OLED 等外设驱动
 │   └── service_*            # 面向应用的能力服务
 ├── boards/                  # 板级支持包
-├── examples/                # 官方示例工程
+├── example/                # 官方示例工程
 ├── project/                 # 用户应用工程
 ├── agent/                   # 本地 Web 智能硬件开发 Agent
 ├── third_party/             # 第三方依赖
@@ -83,7 +83,7 @@ netstat -ano | findstr :4173
 taskkill /PID <PID> /F
 ```
 
-Agent 默认只会把生成的应用工程写入 `project/` 目录，不会修改 `components/`、`boards/`、`examples/` 等 SDK 目录。大模型 API 可以在 Web 界面中配置；未配置 API Key 时，Agent 会使用本地 fallback 流程生成功能分析、器件选型、硬件资源规划、硬件搭建框图和代码脚手架。
+Agent 默认只会把生成的应用工程写入 `project/` 目录，不会修改 `components/`、`boards/`、`example/` 等 SDK 目录。大模型 API 可以在 Web 界面中配置；未配置 API Key 时，Agent 会使用本地 fallback 流程生成功能分析、器件选型、硬件资源规划、硬件搭建框图和代码脚手架。
 
 ## 用户工作流
 
@@ -95,14 +95,14 @@ Agent 默认只会把生成的应用工程写入 `project/` 目录，不会修�
 
     Linux/macOS：
     ```bash
-    ./tools/build.sh example_esp32wroom/<your_project_name> esp32 my_board_esp32wroom
-    ./tools/flash.sh example_esp32wroom/<your_project_name> --target esp32 --board my_board_esp32wroom --port /dev/ttyUSB0
+    ./tools/build.sh example/<your_project_name> esp32 my_board_esp32wroom
+    ./tools/flash.sh example/<your_project_name> --target esp32 --board my_board_esp32wroom --port /dev/ttyUSB0
     ```
 
     Windows PowerShell：
     ```powershell
-    .\tools\build.ps1 example_esp32wroom/<your_project_name> esp32 my_board_esp32wroom
-    .\tools\flash.ps1 example_esp32wroom/<your_project_name> --target esp32 --board my_board_esp32wroom --port COM3
+    .\tools\build.ps1 example/<your_project_name> esp32 my_board_esp32wroom
+    .\tools\flash.ps1 example/<your_project_name> --target esp32 --board my_board_esp32wroom --port COM3
     ```
 ## 常见问题
 

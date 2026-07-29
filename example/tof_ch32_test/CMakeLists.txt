@@ -1,0 +1,9 @@
+cmake_minimum_required(VERSION 3.16)
+
+set(EXTRA_COMPONENT_DIRS
+    "../../bsp"
+    "../../components/ch32_vl53l0x_gateway"
+)
+
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(tof_ch32_test)
