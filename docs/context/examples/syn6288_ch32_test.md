@@ -45,6 +45,6 @@ failure_behavior:
 must_not_include:
   - ESP32 direct SYN6288E UART writes.
   - OLED, MPU6050, motor, servo, TOF, WiFi, or Bluetooth behavior.
-compile_command: .\tools\build.ps1 example/syn6288_ch32_test esp32 my_board_esp32wroom
+compile_command: .\tools\build.ps1 examples_ch32/syn6288_ch32_test esp32 my_board_esp32wroom
 hardware_test_status: untested
 ## END_MOCE_RECIPE_CONTRACT

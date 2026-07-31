@@ -1,6 +1,6 @@
 # SYN6288E CH32 Gateway Test Validation
 
-- Example path: `example/syn6288_ch32_test`
+- Example path: `examples_ch32/syn6288_ch32_test`
 - Helper path: `components/ch32_syn6288_gateway`
 - Protocol: `docs/context/protocols/ch32_syn6288_gateway.md`
 - Compile status: `compile_passed`
@@ -24,7 +24,7 @@ played the expected speech for `宇音天下`.
 
 ## Build Command
 
-Run from `example/syn6288_ch32_test`:
+Run from `examples_ch32/syn6288_ch32_test`:
 
 ```bat
 call D:\Espressif\v6.0.1\idf-env.bat

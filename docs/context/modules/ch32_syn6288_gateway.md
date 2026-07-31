@@ -11,7 +11,7 @@ gateway_required: true
 component_paths:
   - components/ch32_syn6288_gateway
 example_paths:
-  - example/syn6288_ch32_test
+  - examples_ch32/syn6288_ch32_test
 protocol_contracts:
   - docs/context/protocols/ch32_syn6288_gateway.md
 hardware_interface: can_gateway

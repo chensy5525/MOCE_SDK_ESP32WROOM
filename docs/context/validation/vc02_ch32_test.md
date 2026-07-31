@@ -1,6 +1,6 @@
 # VC02 Gateway Test Validation
 
-- Example path: `example/vc02_ch32_test`
+- Example path: `examples_ch32/vc02_ch32_test`
 - Helper path: `components/ch32_vc02_gateway`
 - Protocol: `docs/context/protocols/ch32_vc02_gateway.md`
 - Module context: `docs/context/modules/ch32_vc02_gateway.md`

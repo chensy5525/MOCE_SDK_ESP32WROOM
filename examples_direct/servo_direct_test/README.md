@@ -16,5 +16,5 @@ and servo power GND together.
 Build:
 
 ```powershell
-.\tools\build.ps1 example/servo_direct_test esp32 my_board_esp32wroom
+.\tools\build.ps1 examples_direct/servo_direct_test esp32 my_board_esp32wroom
 ```

@@ -20,6 +20,6 @@ checks the CH32 ACK.
 Build from the repository root:
 
 ```powershell
-.\tools\build.ps1 example/oled_ch32_test esp32 my_board_esp32wroom
+.\tools\build.ps1 examples_ch32/oled_ch32_test esp32 my_board_esp32wroom
 ```
 

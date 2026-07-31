@@ -21,6 +21,6 @@ CH32 status and ACK frames.
 Build from the repository root:
 
 ```powershell
-.\tools\build.ps1 example/mpu6050_ch32_test esp32 my_board_esp32wroom
+.\tools\build.ps1 examples_ch32/mpu6050_ch32_test esp32 my_board_esp32wroom
 ```
 

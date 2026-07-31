@@ -46,6 +46,6 @@ failure_behavior:
 must_not_include:
   - ESP32 direct VC02 UART access.
   - Automatic control of OLED, motor, servo, MPU6050, TOF, SYN6288, WiFi, or Bluetooth unless selected by a separate recipe.
-compile_command: .\tools\build.ps1 example/vc02_ch32_test esp32 my_board_esp32wroom
+compile_command: .\tools\build.ps1 examples_ch32/vc02_ch32_test esp32 my_board_esp32wroom
 hardware_test_status: untested
 ## END_MOCE_RECIPE_CONTRACT

@@ -1,6 +1,6 @@
 # TOF VL53L0X Gateway Test Validation
 
-- Example path: `example/tof_ch32_test`
+- Example path: `examples_ch32/tof_ch32_test`
 - Helper path: `components/ch32_vl53l0x_gateway`
 - Protocol: `docs/context/protocols/ch32_vl53l0x_gateway.md`
 - Board: `my_board_esp32wroom`

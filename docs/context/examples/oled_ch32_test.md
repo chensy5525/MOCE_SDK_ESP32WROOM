@@ -46,6 +46,6 @@ failure_behavior:
 must_not_include:
   - ESP32 direct OLED I2C driver calls.
   - MPU6050, motor, servo, TOF, WiFi, Bluetooth, or local UART behavior.
-compile_command: .\tools\build.ps1 example/oled_ch32_test esp32 my_board_esp32wroom
+compile_command: .\tools\build.ps1 examples_ch32/oled_ch32_test esp32 my_board_esp32wroom
 hardware_test_status: untested
 ## END_MOCE_RECIPE_CONTRACT

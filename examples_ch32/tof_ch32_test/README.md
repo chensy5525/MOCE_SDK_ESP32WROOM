@@ -4,7 +4,7 @@ Minimal ESP32-WROOM example for reading a VL53L0X laser distance module through 
 
 ## Burn Targets
 
-- ESP32-WROOM: burn this example, `example/tof_ch32_test`.
+- ESP32-WROOM: burn this example, `examples_ch32/tof_ch32_test`.
 - CH32: burn `MOCE_SDK_CH32/examples_final/CH32_I2C_bridge_generic`.
 
 ## Hardware Topology

@@ -1,6 +1,6 @@
 # OLED CH32 Gateway Test Validation
 
-- Example path: `example/oled_ch32_test`
+- Example path: `examples_ch32/oled_ch32_test`
 - Helper path: `components/ch32_oled_gateway`
 - Protocol: `docs/context/protocols/ch32_oled_gateway.md`
 - Compile status: `compile_passed`
@@ -23,7 +23,7 @@ detected, the OLED probe succeeded, and the panel displayed `Hello World`.
 
 ## Build Command
 
-Run from `example/oled_ch32_test`:
+Run from `examples_ch32/oled_ch32_test`:
 
 ```bat
 call D:\Espressif\v6.0.1\idf-env.bat

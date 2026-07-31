@@ -11,7 +11,7 @@ gateway_required: true
 component_paths:
   - components/ch32_mpu6050_gateway
 example_paths:
-  - example/mpu6050_ch32_test
+  - examples_ch32/mpu6050_ch32_test
 protocol_contracts:
   - docs/context/protocols/ch32_mpu6050_gateway.md
 hardware_interface: can_gateway

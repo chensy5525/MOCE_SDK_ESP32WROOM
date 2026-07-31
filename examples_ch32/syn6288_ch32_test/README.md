@@ -19,6 +19,6 @@ does not replay automatically after a final ACK timeout.
 Build from the repository root:
 
 ```powershell
-.\tools\build.ps1 example/syn6288_ch32_test esp32 my_board_esp32wroom
+.\tools\build.ps1 examples_ch32/syn6288_ch32_test esp32 my_board_esp32wroom
 ```
 

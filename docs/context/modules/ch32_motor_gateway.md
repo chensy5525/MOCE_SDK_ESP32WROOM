@@ -11,7 +11,7 @@ gateway_required: true
 component_paths:
   - components/ch32_motor_gateway
 example_paths:
-  - example/motor_ch32_test
+  - examples_ch32/motor_ch32_test
 protocol_contracts:
   - docs/context/protocols/ch32_motor_gateway.md
 hardware_interface: can_gateway

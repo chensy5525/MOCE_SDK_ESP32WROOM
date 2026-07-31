@@ -2,7 +2,7 @@
 set -e
 
 SDK_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-PROJECT_DIR=${1:-"$SDK_ROOT/example/final_test"}
+PROJECT_DIR=${1:-"$SDK_ROOT/examples_ch32/final_test"}
 PROJECT_DIR=$(cd "$PROJECT_DIR" && pwd)
 
 if [ $# -gt 0 ]; then

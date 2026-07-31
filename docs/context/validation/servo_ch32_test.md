@@ -1,6 +1,6 @@
 # Servo CH32 Test Validation
 
-- Example path: `example/servo_ch32_test`
+- Example path: `examples_ch32/servo_ch32_test`
 - Helper path: `components/ch32_servo_gateway`
 - Protocol: `docs/context/protocols/ch32_servo_gateway.md`
 - Compile status: compile_passed

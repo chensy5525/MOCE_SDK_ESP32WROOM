@@ -1,6 +1,6 @@
 # MPU6050 CH32 Gateway Test Validation
 
-- Example path: `example/mpu6050_ch32_test`
+- Example path: `examples_ch32/mpu6050_ch32_test`
 - Helper path: `components/ch32_mpu6050_gateway`
 - Protocol: `docs/context/protocols/ch32_mpu6050_gateway.md`
 - Compile status: `compile_passed`
@@ -25,7 +25,7 @@ approximately 500 ms intervals.
 
 ## Build Command
 
-Run from `example/mpu6050_ch32_test`:
+Run from `examples_ch32/mpu6050_ch32_test`:
 
 ```bat
 call D:\Espressif\v6.0.1\idf-env.bat

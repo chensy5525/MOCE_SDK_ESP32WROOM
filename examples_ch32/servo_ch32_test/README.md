@@ -12,5 +12,5 @@ The ESP32-WROOM does not generate servo PWM. It only:
 Build:
 
 ```powershell
-.\tools\build.ps1 example/servo_ch32_test esp32 my_board_esp32wroom
+.\tools\build.ps1 examples_ch32/servo_ch32_test esp32 my_board_esp32wroom
 ```

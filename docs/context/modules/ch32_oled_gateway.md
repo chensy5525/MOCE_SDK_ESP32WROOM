@@ -11,7 +11,7 @@ gateway_required: true
 component_paths:
   - components/ch32_oled_gateway
 example_paths:
-  - example/oled_ch32_test
+  - examples_ch32/oled_ch32_test
 protocol_contracts:
   - docs/context/protocols/ch32_oled_gateway.md
 hardware_interface: can_gateway

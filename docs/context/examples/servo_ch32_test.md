@@ -37,6 +37,6 @@ failure_behavior:
 must_not_include:
   - ESP32 direct PWM servo generation.
   - OLED, motor, MPU6050, TOF, WiFi, or Bluetooth behavior.
-compile_command: .\tools\build.ps1 example/servo_ch32_test esp32 my_board_esp32wroom
+compile_command: .\tools\build.ps1 examples_ch32/servo_ch32_test esp32 my_board_esp32wroom
 hardware_test_status: untested
 ## END_MOCE_RECIPE_CONTRACT

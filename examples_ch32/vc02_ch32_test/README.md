@@ -4,7 +4,7 @@ Minimal ESP32-WROOM example for receiving VC02 voice-recognition UART bytes thro
 
 ## Burn Targets
 
-- ESP32-WROOM: burn this example, `example/vc02_ch32_test`.
+- ESP32-WROOM: burn this example, `examples_ch32/vc02_ch32_test`.
 - CH32: burn the future VC02 UART bridge firmware that forwards VC02 UART RX bytes to ESP32 over CAN. That CH32 firmware is not present in this repository yet.
 
 ## Hardware Topology
