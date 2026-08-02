@@ -32,6 +32,7 @@ if (Test-Path -LiteralPath $ProjectSdkconfigDefaults) {
 . (Join-Path $SdkRoot "third_party/esp-idf/export.ps1")
 
 Set-Location -LiteralPath $ProjectDir
+$env:IDF_TARGET = $Target
 
 $BuildDir = Join-Path $ProjectDir "build"
 if ((Test-Path -LiteralPath $BuildDir) -and (!(Test-Path -LiteralPath (Join-Path $BuildDir "CMakeCache.txt")) -or !(Test-Path -LiteralPath (Join-Path $BuildDir "build.ninja")))) {
