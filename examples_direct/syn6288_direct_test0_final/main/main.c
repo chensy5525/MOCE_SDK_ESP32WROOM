@@ -1,6 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "syn6288_direct_final.h"
+#include "syn6288_direct.h"
 
 void app_main(void)
 {

@@ -4,7 +4,7 @@ ESP32-WROOM 通过 UART 直连 SYN6288，上电等待 3 秒后，每隔 2 秒播
 
 ## 对应驱动
 
-`components_esp32wroom/syn6288_direct_final`
+`components_direct/syn6288_direct`
 
 ## 接线
 
