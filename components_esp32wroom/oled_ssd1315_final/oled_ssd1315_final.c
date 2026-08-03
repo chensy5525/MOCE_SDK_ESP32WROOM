@@ -161,7 +161,14 @@ oled_ssd1315_result_t oled_ssd1315_init(const oled_ssd1315_config_t *config)
 
     vTaskDelay(pdMS_TO_TICKS(20));
     if (bsp_i2c_probe(s_config.address, (int)s_config.timeout_ms) != ESP_OK) {
-        return set_result(OLED_SSD1315_RESULT_ADDR_NOT_FOUND);
+        /* Some SSD1315 modules strap SA0 high and answer at 0x3D. */
+        if (s_config.address == OLED_SSD1315_DEFAULT_ADDR7 &&
+            bsp_i2c_probe(0x3DU, (int)s_config.timeout_ms) == ESP_OK) {
+            s_config.address = 0x3DU;
+            s_status.address = s_config.address;
+        } else {
+            return set_result(OLED_SSD1315_RESULT_ADDR_NOT_FOUND);
+        }
     }
     s_status.device_found = true;
     s_status.state = OLED_SSD1315_STATE_DEVICE_FOUND;

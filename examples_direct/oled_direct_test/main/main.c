@@ -31,7 +31,7 @@ void app_main(void)
 {
     printf("\n==== ESP32-WROOM oled_direct_test ====\n");
     printf("Connection: GPIO21 SDA -> SSD1315 SDA, GPIO22 SCL -> SSD1315 SCL\n");
-    printf("SSD1315: 128x64 addr7=0x3C I2C=400kHz\n");
+    printf("SSD1315: 128x64 addr7=0x3C (fallback 0x3D) I2C=400kHz\n");
     printf("Built-in Chinese glyphs: 你好显示正常\n\n");
 
     oled_ssd1315_config_t config;
@@ -45,7 +45,7 @@ void app_main(void)
         print_status("after_init");
         if (result != OLED_SSD1315_RESULT_OK) {
             ESP_LOGW(TAG,
-                     "retry in 3000 ms; check 3.3V/GND/SDA/SCL and address 0x3C");
+                     "retry in 3000 ms; check 3.3V/GND/SDA/SCL and addresses 0x3C/0x3D");
             vTaskDelay(pdMS_TO_TICKS(3000));
         }
     } while (result != OLED_SSD1315_RESULT_OK);
