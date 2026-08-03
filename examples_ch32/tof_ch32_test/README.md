@@ -32,7 +32,7 @@ Default VL53L0X identity:
 5. ESP32 sends the minimal VL53L0X configuration sequence through CH32.
 6. After initialization succeeds, ESP32 reads distance every 500 ms.
 
-The example intentionally keeps `main.c` thin. Sensor state and CAN bridge operations are kept in `components/ch32_vl53l0x_gateway`.
+The example intentionally keeps `main.c` thin. Sensor state and CAN bridge operations are kept in `components_ch32/ch32_vl53l0x_gateway`.
 
 ## Expected Serial Logs
 

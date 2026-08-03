@@ -4,7 +4,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "oled_ssd1315_final.h"
+#include "oled_ssd1315.h"
 
 static const char *TAG = "oled_direct_test";
 

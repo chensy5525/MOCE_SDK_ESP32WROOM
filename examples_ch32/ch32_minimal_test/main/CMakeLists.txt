@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "main.c"
     INCLUDE_DIRS "."
-    REQUIRES bsp_board mpu6050_direct_i2c
+    REQUIRES bsp_board esp_driver_twai ch32_node_minimal
 )
