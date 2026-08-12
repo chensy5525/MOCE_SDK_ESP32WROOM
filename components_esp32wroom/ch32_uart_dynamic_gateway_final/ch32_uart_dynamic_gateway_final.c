@@ -1,6 +1,6 @@
 #include "ch32_uart_dynamic_gateway_final.h"
 
-#include "ch32_i2c_multi_gateway_final.h"
+#include "ch32_can_gateway_core.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -116,8 +116,8 @@ static ch32_uart_dynamic_result_t send_discovery_query(void)
         CH32_UART_DYNAMIC_PROTOCOL_VERSION,
         0U, ++s_query_sequence, 0U, 0U, 0U
     };
-    return ch32_can_gateway_send_frame(CAN_ID_DISCOVERY, data, sizeof(data)) ==
-                   CH32_I2C_MULTI_RESULT_OK
+    return ch32_can_gateway_core_send(CAN_ID_DISCOVERY, data, sizeof(data)) ==
+                   CH32_CAN_GATEWAY_OK
                ? CH32_UART_DYNAMIC_OK
                : CH32_UART_DYNAMIC_COMM_FAIL;
 }
@@ -134,19 +134,20 @@ static ch32_uart_dynamic_result_t assign_node(
 
     node->node_id = node_id;
     node->ready = false;
-    return ch32_can_gateway_send_frame(CAN_ID_DISCOVERY, data, sizeof(data)) ==
-                   CH32_I2C_MULTI_RESULT_OK
+    return ch32_can_gateway_core_send(CAN_ID_DISCOVERY, data, sizeof(data)) ==
+                   CH32_CAN_GATEWAY_OK
                ? CH32_UART_DYNAMIC_OK
                : CH32_UART_DYNAMIC_COMM_FAIL;
 }
 
 static void drain_observer_queue(uint32_t settle_ms)
 {
-    ch32_i2c_multi_can_frame_t frame;
+    ch32_can_gateway_frame_t frame;
     uint32_t deadline = now_ms() + settle_ms;
     do {
         uint32_t wait_ms = settle_ms == 0U ? 0U : 5U;
-        (void)ch32_can_gateway_poll_observed_frame(&frame, wait_ms);
+        (void)ch32_can_gateway_core_poll_observer(
+            CH32_UART_DYNAMIC_DEVICE_TYPE, &frame, wait_ms);
     } while (settle_ms != 0U && (int32_t)(deadline - now_ms()) > 0);
 }
 
@@ -157,12 +158,12 @@ static ch32_uart_dynamic_result_t wait_transfer_ack(
     uint32_t deadline = now_ms() + timeout_ms;
 
     while ((int32_t)(deadline - now_ms()) > 0) {
-        ch32_i2c_multi_can_frame_t frame;
-        ch32_i2c_multi_result_t result = ch32_can_gateway_poll_control_frame(
+        ch32_can_gateway_frame_t frame;
+        ch32_can_gateway_result_t result = ch32_can_gateway_core_poll_control(
             CH32_UART_DYNAMIC_DEVICE_TYPE, &frame, 10U);
         uint16_t source_id;
 
-        if (result != CH32_I2C_MULTI_RESULT_OK) {
+        if (result != CH32_CAN_GATEWAY_OK) {
             continue;
         }
         if (frame.id != CAN_ID_ACK_BASE + node->node_id || frame.dlc != 8U ||
@@ -201,6 +202,9 @@ int ch32_uart_dynamic_init(const ch32_uart_dynamic_config_t *config)
         config->transfer_ack_timeout_ms == 0U) {
         return -1;
     }
+    if (ch32_can_gateway_core_init() != 0) {
+        return -1;
+    }
     s_config = *config;
     s_initialized = true;
     return 0;
@@ -227,7 +231,7 @@ ch32_uart_dynamic_result_t ch32_uart_dynamic_discover_incremental(
     next_query_ms = now_ms() + DISCOVERY_QUERY_INTERVAL_MS;
 
     while ((int32_t)(deadline - now_ms()) > 0) {
-        ch32_i2c_multi_can_frame_t frame;
+        ch32_can_gateway_frame_t frame;
         ch32_uart_dynamic_node_t *node;
         uint16_t token;
         uint32_t current_ms = now_ms();
@@ -238,8 +242,9 @@ ch32_uart_dynamic_result_t ch32_uart_dynamic_discover_incremental(
             }
             next_query_ms = current_ms + DISCOVERY_QUERY_INTERVAL_MS;
         }
-        if (ch32_can_gateway_poll_observed_frame(&frame, 50U) !=
-            CH32_I2C_MULTI_RESULT_OK) {
+        if (ch32_can_gateway_core_poll_observer(
+                CH32_UART_DYNAMIC_DEVICE_TYPE, &frame, 50U) !=
+            CH32_CAN_GATEWAY_OK) {
             continue;
         }
         if (frame.id >= CAN_ID_HELLO_BASE + UART_NODE_ID_MIN &&
@@ -350,6 +355,10 @@ ch32_uart_dynamic_result_t ch32_uart_dynamic_send(
         node->node_id > UART_NODE_ID_MAX) {
         return CH32_UART_DYNAMIC_NODE_NOT_READY;
     }
+    if (ch32_can_gateway_core_lock(s_config.transfer_ack_timeout_ms) !=
+        CH32_CAN_GATEWAY_OK) {
+        return CH32_UART_DYNAMIC_BUSY;
+    }
     s_transfer_id++;
     if (s_transfer_id == 0U) {
         s_transfer_id++;
@@ -360,16 +369,17 @@ ch32_uart_dynamic_result_t ch32_uart_dynamic_send(
     start_frame[5] = CH32_UART_DYNAMIC_PROTOCOL_VERSION;
     start_frame[6] = 0U;
 
-    if (ch32_can_gateway_send_frame(CAN_ID_START_BASE + node->node_id,
-                                    start_frame, sizeof(start_frame)) !=
-        CH32_I2C_MULTI_RESULT_OK) {
-        return CH32_UART_DYNAMIC_COMM_FAIL;
+    if (ch32_can_gateway_core_send(CAN_ID_START_BASE + node->node_id,
+                                   start_frame, sizeof(start_frame)) !=
+        CH32_CAN_GATEWAY_OK) {
+        result = CH32_UART_DYNAMIC_COMM_FAIL;
+        goto transfer_done;
     }
     result = wait_transfer_ack(node, s_transfer_id, ACK_PHASE_START,
                                s_config.assign_ack_timeout_ms,
                                &processed_len);
     if (result != CH32_UART_DYNAMIC_OK) {
-        return result;
+        goto transfer_done;
     }
 
     while (offset < length) {
@@ -381,10 +391,11 @@ ch32_uart_dynamic_result_t ch32_uart_dynamic_send(
         frame[0] = s_transfer_id;
         put_u16_le(&frame[1], sequence++);
         memcpy(&frame[3], &data[offset], chunk);
-        if (ch32_can_gateway_send_frame(CAN_ID_DATA_BASE + node->node_id,
-                                        frame, (uint8_t)(3U + chunk)) !=
-            CH32_I2C_MULTI_RESULT_OK) {
-            return CH32_UART_DYNAMIC_COMM_FAIL;
+        if (ch32_can_gateway_core_send(CAN_ID_DATA_BASE + node->node_id,
+                                       frame, (uint8_t)(3U + chunk)) !=
+            CH32_CAN_GATEWAY_OK) {
+            result = CH32_UART_DYNAMIC_COMM_FAIL;
+            goto transfer_done;
         }
         offset += chunk;
         vTaskDelay(pdMS_TO_TICKS(1U));
@@ -393,10 +404,14 @@ ch32_uart_dynamic_result_t ch32_uart_dynamic_send(
                                s_config.transfer_ack_timeout_ms,
                                &processed_len);
     if (result != CH32_UART_DYNAMIC_OK) {
-        return result;
+        goto transfer_done;
     }
-    return processed_len == length ? CH32_UART_DYNAMIC_OK
-                                   : CH32_UART_DYNAMIC_LENGTH_ERROR;
+    result = processed_len == length ? CH32_UART_DYNAMIC_OK
+                                     : CH32_UART_DYNAMIC_LENGTH_ERROR;
+
+transfer_done:
+    ch32_can_gateway_core_unlock();
+    return result;
 }
 
 ch32_uart_dynamic_result_t ch32_uart_dynamic_send_profile(
@@ -439,16 +454,16 @@ ch32_uart_dynamic_result_t ch32_uart_dynamic_poll_rx(
     ch32_uart_dynamic_node_t *nodes, size_t count,
     ch32_uart_dynamic_rx_t *rx, uint32_t timeout_ms)
 {
-    ch32_i2c_multi_can_frame_t frame;
+    ch32_can_gateway_frame_t frame;
     size_t index;
 
     if (nodes == NULL || rx == NULL) {
         return CH32_UART_DYNAMIC_COMM_FAIL;
     }
     memset(rx, 0, sizeof(*rx));
-    if (ch32_can_gateway_poll_control_frame(CH32_UART_DYNAMIC_DEVICE_TYPE,
-                                            &frame, timeout_ms) !=
-        CH32_I2C_MULTI_RESULT_OK) {
+    if (ch32_can_gateway_core_poll_control(CH32_UART_DYNAMIC_DEVICE_TYPE,
+                                           &frame, timeout_ms) !=
+        CH32_CAN_GATEWAY_OK) {
         return CH32_UART_DYNAMIC_NO_DATA;
     }
     for (index = 0U; index < count; ++index) {

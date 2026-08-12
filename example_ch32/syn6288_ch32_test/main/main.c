@@ -1,4 +1,3 @@
-#include "ch32_i2c_multi_gateway_final.h"
 #include "ch32_uart_dynamic_gateway_final.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -81,15 +80,9 @@ static void syn6288e_inventory_task(void *argument)
 
 void app_main(void)
 {
-    ch32_i2c_multi_config_t can_config;
     ch32_uart_dynamic_config_t uart_config;
     TickType_t last_wake_time;
 
-    ch32_i2c_multi_default_config(&can_config);
-    if (ch32_i2c_multi_init(&can_config) != 0) {
-        printf("[ERR][SYN6288E_EXAMPLE] shared CAN gateway init failed\n");
-        return;
-    }
     ch32_uart_dynamic_default_config(&uart_config);
     uart_config.discovery_window_ms = SYN6288E_EXAMPLE_DISCOVERY_MS;
     if (ch32_uart_dynamic_init(&uart_config) != 0) {

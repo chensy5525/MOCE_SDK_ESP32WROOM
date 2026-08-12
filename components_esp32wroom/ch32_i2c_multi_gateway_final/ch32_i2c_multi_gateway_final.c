@@ -1,18 +1,10 @@
 #include "ch32_i2c_multi_gateway_final.h"
+#include "ch32_can_gateway_core.h"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcpp"
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#include "driver/twai.h"
-#pragma GCC diagnostic pop
-
-#include "board.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
-#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include <string.h>
 
@@ -64,71 +56,10 @@ static const char *TAG = "ch32_i2c_multi";
 
 static bool s_initialized;
 static ch32_i2c_multi_config_t s_cfg;
-static SemaphoreHandle_t s_can_mutex;
-static QueueHandle_t s_rx_queue;
-static QueueHandle_t s_ctl_queue_i2c;
-static QueueHandle_t s_ctl_queue_uart;
-static QueueHandle_t s_obs_queue;
-static volatile uint32_t s_isr_rx_count;
-static volatile uint32_t s_route_data_count;
-static volatile uint32_t s_route_i2c_count;
-static volatile uint32_t s_route_uart_count;
-static volatile uint32_t s_route_observer_count;
-static volatile uint32_t s_app_rx_count;
-static volatile uint32_t s_tx_count;
 
 static uint32_t ch32_i2c_multi_now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000LL);
-}
-
-static void ch32_can_route_frame(const twai_message_t *message)
-{
-    ch32_i2c_multi_can_frame_t frame = {0};
-
-    frame.id = message->identifier;
-    frame.dlc = message->data_length_code > 8U ? 8U : message->data_length_code;
-    frame.extd = (message->flags & TWAI_MSG_FLAG_EXTD) != 0U;
-    memcpy(frame.data, message->data, frame.dlc);
-
-    s_isr_rx_count++;
-    if (frame.id == CAN_ID_DISCOVERY ||
-        (frame.id >= CAN_ID_HELLO_BASE &&
-         frame.id < CAN_ID_HELLO_BASE + 256U)) {
-        if (xQueueSend(s_obs_queue, &frame, 0U) == pdTRUE) {
-            s_route_observer_count++;
-        }
-    } else if (frame.id >= CAN_ID_UART_RX_BASE &&
-               frame.id < CAN_ID_UART_RX_BASE + 256U) {
-        if (xQueueSend(s_ctl_queue_uart, &frame, 0U) == pdTRUE) {
-            s_route_uart_count++;
-        }
-    } else if ((frame.id >= CAN_ID_STATUS_BASE &&
-                frame.id < CAN_ID_STATUS_BASE + 256U) ||
-               (frame.id >= CAN_ID_ACK_BASE &&
-                frame.id < CAN_ID_ACK_BASE + 256U)) {
-        if (xQueueSend(s_ctl_queue_i2c, &frame, 0U) == pdTRUE) {
-            s_route_i2c_count++;
-        }
-        /* 状态/ACK ID 区间由多种网关共享。此处复制到各控制队列，
-         * 保持全局只有一个 TWAI 接收者，再由各协议校验 device_type。 */
-        if (xQueueSend(s_ctl_queue_uart, &frame, 0U) == pdTRUE) {
-            s_route_uart_count++;
-        }
-    } else if (xQueueSend(s_rx_queue, &frame, 0U) == pdTRUE) {
-        s_route_data_count++;
-    }
-}
-
-static void ch32_can_rx_task(void *arg)
-{
-    (void)arg;
-    for (;;) {
-        twai_message_t message;
-        if (twai_receive(&message, portMAX_DELAY) == ESP_OK) {
-            ch32_can_route_frame(&message);
-        }
-    }
 }
 
 void ch32_i2c_multi_default_config(ch32_i2c_multi_config_t *cfg)
@@ -141,129 +72,46 @@ void ch32_i2c_multi_default_config(ch32_i2c_multi_config_t *cfg)
     cfg->command_timeout_ms = 350U;
 }
 
+
 int ch32_i2c_multi_init(const ch32_i2c_multi_config_t *cfg)
 {
-    twai_general_config_t general_config;
-    twai_timing_config_t timing_config = TWAI_TIMING_CONFIG_500KBITS();
-    twai_filter_config_t filter_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
-    esp_err_t error;
-
     if (cfg == NULL || cfg->command_timeout_ms == 0U) {
         return -1;
     }
     if (s_initialized) {
         return 0;
     }
+    if (ch32_can_gateway_core_init() != 0) {
+        ESP_LOGE(TAG, "shared CAN core init failed");
+        return -1;
+    }
     s_cfg = *cfg;
-    general_config = (twai_general_config_t)TWAI_GENERAL_CONFIG_DEFAULT(
-        BOARD_CAN_TX_GPIO, BOARD_CAN_RX_GPIO, TWAI_MODE_NORMAL);
-
-    error = twai_driver_install(&general_config, &timing_config, &filter_config);
-    if (error != ESP_OK) {
-        ESP_LOGE(TAG, "twai_driver_install failed: %s", esp_err_to_name(error));
-        return -1;
-    }
-    error = twai_start();
-    if (error != ESP_OK) {
-        ESP_LOGE(TAG, "twai_start failed: %s", esp_err_to_name(error));
-        (void)twai_driver_uninstall();
-        return -1;
-    }
-
-    s_rx_queue = xQueueCreate(32U, sizeof(ch32_i2c_multi_can_frame_t));
-    s_ctl_queue_i2c = xQueueCreate(64U, sizeof(ch32_i2c_multi_can_frame_t));
-    s_ctl_queue_uart = xQueueCreate(64U, sizeof(ch32_i2c_multi_can_frame_t));
-    s_obs_queue = xQueueCreate(64U, sizeof(ch32_i2c_multi_can_frame_t));
-    s_can_mutex = xSemaphoreCreateMutex();
-    if (s_rx_queue == NULL || s_ctl_queue_i2c == NULL ||
-        s_ctl_queue_uart == NULL || s_obs_queue == NULL || s_can_mutex == NULL) {
-        ESP_LOGE(TAG, "CAN routing resource allocation failed");
-        (void)twai_stop();
-        (void)twai_driver_uninstall();
-        return -1;
-    }
-    if (xTaskCreate(ch32_can_rx_task, "ch32_can_rx", 4096U, NULL, 10U,
-                    NULL) != pdPASS) {
-        ESP_LOGE(TAG, "CAN RX routing task creation failed");
-        (void)twai_stop();
-        (void)twai_driver_uninstall();
-        return -1;
-    }
     s_initialized = true;
-    ESP_LOGI(TAG, "init OK bitrate=%u tx=%d rx=%d",
-             (unsigned)CH32_CAN_GATEWAY_BITRATE_HZ,
-             BOARD_CAN_TX_GPIO, BOARD_CAN_RX_GPIO);
+    ESP_LOGI(TAG, "protocol init OK");
     return 0;
+}
+
+
+static ch32_i2c_multi_result_t ch32_i2c_multi_map_core_result(
+    ch32_can_gateway_result_t result)
+{
+    switch (result) {
+    case CH32_CAN_GATEWAY_OK: return CH32_I2C_MULTI_RESULT_OK;
+    case CH32_CAN_GATEWAY_TIMEOUT: return CH32_I2C_MULTI_RESULT_TIMEOUT;
+    case CH32_CAN_GATEWAY_NO_DATA: return CH32_I2C_MULTI_RESULT_NO_DATA;
+    case CH32_CAN_GATEWAY_INVALID_ARG:
+        return CH32_I2C_MULTI_RESULT_INVALID_ARG;
+    case CH32_CAN_GATEWAY_BUSY: return CH32_I2C_MULTI_RESULT_BUSY;
+    case CH32_CAN_GATEWAY_COMM_FAIL:
+    default: return CH32_I2C_MULTI_RESULT_COMM_FAIL;
+    }
 }
 
 ch32_i2c_multi_result_t ch32_can_gateway_send_frame(
     uint32_t id, const uint8_t *data, uint8_t dlc)
 {
-    twai_message_t message = {0};
-    twai_status_info_t status = {0};
-    esp_err_t transmit_error;
-    static uint32_t last_fault_log_ms;
-
-    if (!s_initialized) {
-        return CH32_I2C_MULTI_RESULT_COMM_FAIL;
-    }
-    if (data == NULL || dlc > 8U || id > 0x7FFU) {
-        return CH32_I2C_MULTI_RESULT_INVALID_ARG;
-    }
-    message.identifier = id;
-    message.data_length_code = dlc;
-    memcpy(message.data, data, dlc);
-
-    transmit_error = twai_transmit(&message, pdMS_TO_TICKS(50U));
-    if (transmit_error == ESP_OK) {
-        s_tx_count++;
-        return CH32_I2C_MULTI_RESULT_OK;
-    }
-
-    if (twai_get_status_info(&status) == ESP_OK) {
-        uint32_t now_ms = ch32_i2c_multi_now_ms();
-
-        if (status.state == TWAI_STATE_BUS_OFF) {
-            esp_err_t recovery_error = twai_initiate_recovery();
-            ESP_LOGE(TAG,
-                     "CAN bus-off id=0x%03lX tec=%lu rec=%lu bus_err=%lu recovery=%s",
-                     (unsigned long)id,
-                     (unsigned long)status.tx_error_counter,
-                     (unsigned long)status.rx_error_counter,
-                     (unsigned long)status.bus_error_count,
-                     esp_err_to_name(recovery_error));
-            last_fault_log_ms = now_ms;
-        } else if (status.state == TWAI_STATE_STOPPED) {
-            esp_err_t start_error = twai_start();
-            if (start_error == ESP_OK) {
-                ESP_LOGW(TAG, "CAN recovery complete, controller restarted");
-                transmit_error = twai_transmit(&message, pdMS_TO_TICKS(50U));
-                if (transmit_error == ESP_OK) {
-                    s_tx_count++;
-                    return CH32_I2C_MULTI_RESULT_OK;
-                }
-            } else {
-                ESP_LOGE(TAG, "CAN restart failed: %s",
-                         esp_err_to_name(start_error));
-            }
-            last_fault_log_ms = now_ms;
-        } else if ((uint32_t)(now_ms - last_fault_log_ms) >= 1000U) {
-            ESP_LOGW(TAG,
-                     "CAN TX failed id=0x%03lX err=%s state=%u queued=%lu tec=%lu rec=%lu bus_err=%lu",
-                     (unsigned long)id, esp_err_to_name(transmit_error),
-                     (unsigned)status.state,
-                     (unsigned long)status.msgs_to_tx,
-                     (unsigned long)status.tx_error_counter,
-                     (unsigned long)status.rx_error_counter,
-                     (unsigned long)status.bus_error_count);
-            last_fault_log_ms = now_ms;
-        }
-    }
-
-    if (transmit_error != ESP_OK) {
-        return CH32_I2C_MULTI_RESULT_COMM_FAIL;
-    }
-    return CH32_I2C_MULTI_RESULT_COMM_FAIL;
+    return ch32_i2c_multi_map_core_result(
+        ch32_can_gateway_core_send(id, data, dlc));
 }
 
 void ch32_can_gateway_set_observer_filter(uint32_t filter_id)
@@ -271,55 +119,43 @@ void ch32_can_gateway_set_observer_filter(uint32_t filter_id)
     (void)filter_id;
 }
 
-static ch32_i2c_multi_result_t ch32_i2c_multi_poll_queue(
-    QueueHandle_t queue, ch32_i2c_multi_can_frame_t *frame,
-    uint32_t timeout_ms)
-{
-    TickType_t ticks;
-
-    if (queue == NULL || frame == NULL) {
-        return CH32_I2C_MULTI_RESULT_INVALID_ARG;
-    }
-    ticks = timeout_ms > 0U ? pdMS_TO_TICKS(timeout_ms) : 0U;
-    if (xQueueReceive(queue, frame, ticks) != pdTRUE) {
-        return CH32_I2C_MULTI_RESULT_NO_DATA;
-    }
-    s_app_rx_count++;
-    return CH32_I2C_MULTI_RESULT_OK;
-}
-
 ch32_i2c_multi_result_t ch32_can_gateway_poll_control_frame(
     uint8_t device_type, ch32_i2c_multi_can_frame_t *frame,
     uint32_t timeout_ms)
 {
-    QueueHandle_t queue = device_type == UART_DEVICE_TYPE
-                              ? s_ctl_queue_uart
-                              : s_ctl_queue_i2c;
-    return ch32_i2c_multi_poll_queue(queue, frame, timeout_ms);
+    return ch32_i2c_multi_map_core_result(
+        ch32_can_gateway_core_poll_control(
+            device_type, (ch32_can_gateway_frame_t *)frame, timeout_ms));
 }
 
 ch32_i2c_multi_result_t ch32_can_gateway_poll_observed_frame(
     ch32_i2c_multi_can_frame_t *frame, uint32_t timeout_ms)
 {
-    return ch32_i2c_multi_poll_queue(s_obs_queue, frame, timeout_ms);
+    return ch32_i2c_multi_map_core_result(
+        ch32_can_gateway_core_poll_observer(
+            I2C_DEVICE_TYPE, (ch32_can_gateway_frame_t *)frame,
+            timeout_ms));
 }
 
 ch32_i2c_multi_result_t ch32_i2c_multi_poll_can_frame(
     ch32_i2c_multi_can_frame_t *frame, uint32_t timeout_ms)
 {
-    return ch32_i2c_multi_poll_queue(s_rx_queue, frame, timeout_ms);
+    return ch32_i2c_multi_map_core_result(
+        ch32_can_gateway_core_poll_data(
+            (ch32_can_gateway_frame_t *)frame, timeout_ms));
 }
 
 static void ch32_i2c_multi_drain_observer_queue(uint32_t settle_ms)
 {
     ch32_i2c_multi_can_frame_t discarded;
     uint32_t deadline = ch32_i2c_multi_now_ms() + settle_ms;
+    ch32_i2c_multi_result_t result;
 
     do {
         uint32_t wait_ms = settle_ms == 0U ? 0U : 10U;
-        (void)ch32_i2c_multi_poll_queue(s_obs_queue, &discarded, wait_ms);
+        result = ch32_can_gateway_poll_observed_frame(&discarded, wait_ms);
     } while (settle_ms == 0U
-                 ? uxQueueMessagesWaiting(s_obs_queue) > 0U
+                 ? result == CH32_I2C_MULTI_RESULT_OK
                  : (int32_t)(deadline - ch32_i2c_multi_now_ms()) > 0);
 }
 
@@ -430,7 +266,7 @@ ch32_i2c_multi_result_t ch32_i2c_multi_discover_incremental(
             next_query_ms = now_ms + DISCOVERY_QUERY_INTERVAL_MS;
         }
 
-        if (ch32_i2c_multi_poll_queue(s_obs_queue, &frame, 50U) !=
+        if (ch32_can_gateway_poll_observed_frame(&frame, 50U) !=
             CH32_I2C_MULTI_RESULT_OK) {
             continue;
         }
@@ -571,7 +407,8 @@ static bool ch32_i2c_multi_node_valid(const ch32_i2c_multi_node_t *node)
 static void ch32_i2c_multi_drain_control_queue(void)
 {
     ch32_i2c_multi_can_frame_t discarded;
-    while (ch32_i2c_multi_poll_queue(s_ctl_queue_i2c, &discarded, 0U) ==
+    while (ch32_can_gateway_poll_control_frame(
+               I2C_DEVICE_TYPE, &discarded, 0U) ==
            CH32_I2C_MULTI_RESULT_OK) {
     }
 }
@@ -589,7 +426,8 @@ static ch32_i2c_multi_result_t ch32_i2c_multi_wait_command(
 
     while ((int32_t)(deadline - ch32_i2c_multi_now_ms()) > 0) {
         ch32_i2c_multi_can_frame_t frame;
-        if (ch32_i2c_multi_poll_queue(s_ctl_queue_i2c, &frame, 20U) !=
+        if (ch32_can_gateway_poll_control_frame(
+                I2C_DEVICE_TYPE, &frame, 20U) !=
             CH32_I2C_MULTI_RESULT_OK) {
             continue;
         }
@@ -648,8 +486,8 @@ static ch32_i2c_multi_result_t ch32_i2c_multi_run_command(
     if (!ch32_i2c_multi_node_valid(node)) {
         return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     }
-    if (xSemaphoreTake(s_can_mutex, pdMS_TO_TICKS(s_cfg.command_timeout_ms)) !=
-        pdTRUE) {
+    if (ch32_can_gateway_core_lock(s_cfg.command_timeout_ms) !=
+        CH32_CAN_GATEWAY_OK) {
         return CH32_I2C_MULTI_RESULT_BUSY;
     }
     ch32_i2c_multi_drain_control_queue();
@@ -660,7 +498,7 @@ static ch32_i2c_multi_result_t ch32_i2c_multi_run_command(
             node, command[0], status_type, expected_addr, expected_detail,
             status_frame);
     }
-    xSemaphoreGive(s_can_mutex);
+    ch32_can_gateway_core_unlock();
     return result;
 }
 
@@ -755,8 +593,8 @@ ch32_i2c_multi_result_t ch32_i2c_multi_write_multi_to(
         len == 0U || len > I2C_MULTI_BUFFER_MAX) {
         return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     }
-    if (xSemaphoreTake(s_can_mutex, pdMS_TO_TICKS(s_cfg.command_timeout_ms)) !=
-        pdTRUE) {
+    if (ch32_can_gateway_core_lock(s_cfg.command_timeout_ms) !=
+        CH32_CAN_GATEWAY_OK) {
         return CH32_I2C_MULTI_RESULT_BUSY;
     }
     ch32_i2c_multi_drain_control_queue();
@@ -789,7 +627,7 @@ ch32_i2c_multi_result_t ch32_i2c_multi_write_multi_to(
         }
         offset = (uint8_t)(offset + chunk);
     }
-    xSemaphoreGive(s_can_mutex);
+    ch32_can_gateway_core_unlock();
     return result;
 }
 
@@ -845,22 +683,23 @@ ch32_i2c_multi_result_t ch32_i2c_multi_read_regs_from(
         len == 0U || len > 32U) {
         return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     }
-    if (xSemaphoreTake(s_can_mutex, pdMS_TO_TICKS(s_cfg.command_timeout_ms)) !=
-        pdTRUE) {
+    if (ch32_can_gateway_core_lock(s_cfg.command_timeout_ms) !=
+        CH32_CAN_GATEWAY_OK) {
         return CH32_I2C_MULTI_RESULT_BUSY;
     }
     ch32_i2c_multi_drain_control_queue();
     result = ch32_can_gateway_send_frame(CAN_ID_CMD_BASE + node->node_id,
                                          command, 8U);
     if (result != CH32_I2C_MULTI_RESULT_OK) {
-        xSemaphoreGive(s_can_mutex);
+        ch32_can_gateway_core_unlock();
         return result;
     }
 
     deadline = ch32_i2c_multi_now_ms() + s_cfg.command_timeout_ms;
     while ((int32_t)(deadline - ch32_i2c_multi_now_ms()) > 0) {
         ch32_i2c_multi_can_frame_t frame;
-        if (ch32_i2c_multi_poll_queue(s_ctl_queue_i2c, &frame, 20U) !=
+        if (ch32_can_gateway_poll_control_frame(
+                I2C_DEVICE_TYPE, &frame, 20U) !=
             CH32_I2C_MULTI_RESULT_OK) {
             continue;
         }
@@ -889,11 +728,11 @@ ch32_i2c_multi_result_t ch32_i2c_multi_read_regs_from(
             result = done_success && ack_success && received == len
                          ? CH32_I2C_MULTI_RESULT_OK
                          : CH32_I2C_MULTI_RESULT_COMM_FAIL;
-            xSemaphoreGive(s_can_mutex);
+            ch32_can_gateway_core_unlock();
             return result;
         }
     }
-    xSemaphoreGive(s_can_mutex);
+    ch32_can_gateway_core_unlock();
     return CH32_I2C_MULTI_RESULT_TIMEOUT;
 }
 
@@ -957,24 +796,8 @@ ch32_i2c_multi_result_t ch32_i2c_multi_set_speed_400k(
 
 uint32_t ch32_i2c_multi_get_status(ch32_i2c_multi_status_field_t field)
 {
-    switch (field) {
-    case CH32_I2C_MULTI_STATUS_ISR_RX:
-        return s_isr_rx_count;
-    case CH32_I2C_MULTI_STATUS_ROUTE_DATA:
-        return s_route_data_count;
-    case CH32_I2C_MULTI_STATUS_ROUTE_I2C:
-        return s_route_i2c_count;
-    case CH32_I2C_MULTI_STATUS_ROUTE_UART:
-        return s_route_uart_count;
-    case CH32_I2C_MULTI_STATUS_ROUTE_OBSERVER:
-        return s_route_observer_count;
-    case CH32_I2C_MULTI_STATUS_APP_RX:
-        return s_app_rx_count;
-    case CH32_I2C_MULTI_STATUS_TX:
-        return s_tx_count;
-    default:
-        return 0U;
-    }
+    return ch32_can_gateway_core_get_status(
+        (ch32_can_gateway_status_field_t)field);
 }
 
 const char *ch32_i2c_multi_result_text(ch32_i2c_multi_result_t result)

@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "ch32_can_gateway_core.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,8 +11,8 @@ extern "C" {
 #define CH32_I2C_MULTI_MAX_NODES           6U
 #define CH32_I2C_MULTI_MAX_ADDRS_PER_NODE  8U
 #define CH32_I2C_MULTI_DYN_DEVICE_TYPE_I2C 0x01U
-#define CH32_CAN_GATEWAY_BITRATE_HZ        500000U
-#define CH32_CAN_GATEWAY_MAX_FRAME_DATA    8U
+#define CH32_CAN_GATEWAY_BITRATE_HZ        CH32_CAN_GATEWAY_CORE_BITRATE_HZ
+#define CH32_CAN_GATEWAY_MAX_FRAME_DATA    CH32_CAN_GATEWAY_CORE_FRAME_DATA_MAX
 
 typedef enum {
     CH32_I2C_MULTI_RESULT_OK = 0,
@@ -38,12 +39,7 @@ typedef enum {
     CH32_I2C_MULTI_STATUS_TX,
 } ch32_i2c_multi_status_field_t;
 
-typedef struct {
-    uint32_t id;
-    uint8_t  data[CH32_CAN_GATEWAY_MAX_FRAME_DATA];
-    uint8_t  dlc;
-    bool     extd;
-} ch32_i2c_multi_can_frame_t;
+typedef ch32_can_gateway_frame_t ch32_i2c_multi_can_frame_t;
 
 typedef struct {
     uint8_t  node_id;
