@@ -3,6 +3,7 @@
 #include <string.h>
 #include "bsp_i2c.h"
 #include "esp_err.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #define TAG "VL53L4CD"
@@ -19,11 +20,17 @@
 #define REG_DISTANCE 0x0096U
 #define REG_FIRMWARE_STATUS 0x00E5U
 #define REG_MODEL_ID 0x010FU
-#define POLL_MS 5U
+#define POLL_MS 10U
 #define LOG_INF(f, ...) printf("[INF][" TAG "] " f "\n", ##__VA_ARGS__)
 #define LOG_ERR(f, ...) printf("[ERR][" TAG "] " f "\n", ##__VA_ARGS__)
 #define TRY(x) do { int r_=(x); if(r_!=0)return r_; } while(0)
-typedef struct vl53l4cd_ctx { bool allocated,initialized; i2c_master_dev_handle_t dev; vl53l4cd_cfg_t cfg; } vl53l4cd_ctx_t;
+typedef struct vl53l4cd_ctx {
+    bool allocated;
+    bool initialized;
+    uint8_t ready_level;
+    i2c_master_dev_handle_t dev;
+    vl53l4cd_cfg_t cfg;
+} vl53l4cd_ctx_t;
 static vl53l4cd_ctx_t s_instance;
 /* ST VL53L4CD ULD V1.0.0 default configuration, registers 0x002D..0x0087. */
 static const uint8_t s_default_config[] = {
@@ -34,14 +41,429 @@ static const uint8_t s_default_config[] = {
 0x00,0x0F,0x89,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x07,0x05,0x06,0x06,0x00,
 0x00,0x02,0xC7,0xFF,0x9B,0x00,0x00,0x00,0x01,0x00,0x00};
 static void delay_ms(uint32_t ms){TickType_t t=pdMS_TO_TICKS(ms);vTaskDelay(t?t:1U);}
-static int map_err(esp_err_t e){return e==ESP_ERR_TIMEOUT?ERR_TIMEOUT:(e==ESP_ERR_INVALID_ARG?ERR_INVALID_PARAM:ERR_VL53L4CD_COMM);}
-static int write_data(vl53l4cd_ctx_t*c,uint16_t reg,const uint8_t*data,size_t len){uint8_t b[32];while(len){size_t n=len>30U?30U:len;b[0]=(uint8_t)(reg>>8);b[1]=(uint8_t)reg;memcpy(b+2,data,n);esp_err_t e=ESP_FAIL;for(uint32_t i=0;i<VL53L4CD_MAX_RETRIES;i++){e=bsp_i2c_write(c->dev,b,n+2U,(int)c->cfg.timeout_ms);if(e==ESP_OK)break;delay_ms(2U);}if(e!=ESP_OK){LOG_ERR("i2c write FAIL reg=0x%04X err=%s",reg,esp_err_to_name(e));return map_err(e);}reg=(uint16_t)(reg+n);data+=n;len-=n;}return 0;}
-static int read_data(vl53l4cd_ctx_t*c,uint16_t reg,uint8_t*data,size_t len){uint8_t idx[2]={(uint8_t)(reg>>8),(uint8_t)reg};esp_err_t e=ESP_FAIL;for(uint32_t i=0;i<VL53L4CD_MAX_RETRIES;i++){e=bsp_i2c_write_read(c->dev,idx,2U,data,len,(int)c->cfg.timeout_ms);if(e==ESP_OK)return 0;delay_ms(2U);}LOG_ERR("i2c read FAIL reg=0x%04X err=%s",reg,esp_err_to_name(e));return map_err(e);}
-static int w8(vl53l4cd_ctx_t*c,uint16_t r,uint8_t v){return write_data(c,r,&v,1U);}static int w16(vl53l4cd_ctx_t*c,uint16_t r,uint16_t v){uint8_t d[2]={(uint8_t)(v>>8),(uint8_t)v};return write_data(c,r,d,2U);}static int w32(vl53l4cd_ctx_t*c,uint16_t r,uint32_t v){uint8_t d[4]={(uint8_t)(v>>24),(uint8_t)(v>>16),(uint8_t)(v>>8),(uint8_t)v};return write_data(c,r,d,4U);}static int r8(vl53l4cd_ctx_t*c,uint16_t r,uint8_t*v){return read_data(c,r,v,1U);}static int r16(vl53l4cd_ctx_t*c,uint16_t r,uint16_t*v){uint8_t d[2];TRY(read_data(c,r,d,2U));*v=((uint16_t)d[0]<<8)|d[1];return 0;}
-static int data_ready(vl53l4cd_ctx_t*c,bool*ready){uint8_t mux,status;TRY(r8(c,REG_GPIO_MUX,&mux));TRY(r8(c,REG_GPIO_STATUS,&status));*ready=(status&1U)==(((mux>>4U)&1U)?0U:1U);return 0;}
-static int wait_ready(vl53l4cd_ctx_t*c,uint32_t timeout){for(uint32_t e=0;e<timeout;e+=POLL_MS){bool ready;TRY(data_ready(c,&ready));if(ready)return 0;delay_ms(POLL_MS);}return ERR_VL53L4CD_DATA_NOT_READY;}
-static int set_range_timing(vl53l4cd_ctx_t*c,uint32_t ms){uint16_t osc,enc,exp=0;uint32_t budget,macro,val,tmp;TRY(r16(c,REG_OSC_FREQUENCY,&osc));if(!osc||ms<10U||ms>200U)return ERR_INVALID_PARAM;budget=ms*1000U-2500U;macro=(uint32_t)(((uint64_t)2304U*(0x40000000ULL/osc))>>6U);budget<<=12U;tmp=macro*16U;val=((budget+((tmp>>6U)>>1U))/(tmp>>6U))-1U;while(val&0xFFFFFF00U){val>>=1U;exp++;}enc=(uint16_t)((exp<<8U)|(val&0xFFU));TRY(w16(c,REG_RANGE_CONFIG_A,enc));exp=0;tmp=macro*12U;val=((budget+((tmp>>6U)>>1U))/(tmp>>6U))-1U;while(val&0xFFFFFF00U){val>>=1U;exp++;}return w16(c,REG_RANGE_CONFIG_B,(uint16_t)((exp<<8U)|(val&0xFFU)));}
-static int sensor_init(vl53l4cd_ctx_t*c){uint16_t id;uint8_t fw;TRY(r16(c,REG_MODEL_ID,&id));if(id!=VL53L4CD_MODEL_ID){LOG_ERR("id_check FAIL expected=0x%04X got=0x%04X",VL53L4CD_MODEL_ID,id);return ERR_VL53L4CD_ID_MISMATCH;}for(uint32_t i=0;i<1000U;i++){TRY(r8(c,REG_FIRMWARE_STATUS,&fw));if(fw==3U)break;if(i==999U)return ERR_TIMEOUT;delay_ms(1U);}TRY(write_data(c,0x002DU,s_default_config,sizeof(s_default_config)));TRY(w8(c,REG_SYSTEM_START,0x40U));TRY(wait_ready(c,1000U));TRY(w8(c,REG_INTERRUPT_CLEAR,1U));TRY(w8(c,REG_SYSTEM_START,0U));TRY(w8(c,REG_VHV_TIMEOUT,0x09U));TRY(w8(c,0x000BU,0U));TRY(w16(c,0x0024U,0x0500U));TRY(set_range_timing(c,50U));TRY(w32(c,REG_INTERMEASUREMENT,0U));TRY(w8(c,REG_SYSTEM_START,0x21U));TRY(wait_ready(c,1000U));return w8(c,REG_INTERRUPT_CLEAR,1U);}
-int vl53l4cd_init(vl53l4cd_handle_t*h,const vl53l4cd_cfg_t*cfg){if(!h||!cfg||s_instance.allocated||cfg->i2c_addr!=0x29U||!cfg->bus_speed_hz||cfg->bus_speed_hz>400000U||!cfg->timeout_ms||!cfg->data_ready_timeout_ms)return ERR_INVALID_PARAM;*h=NULL;memset(&s_instance,0,sizeof(s_instance));s_instance.allocated=true;s_instance.cfg=*cfg;esp_err_t e=ESP_OK;if(cfg->initialize_i2c||!bsp_i2c_is_initialized())e=bsp_i2c_init();if(e==ESP_OK)e=bsp_i2c_add_device_7bit(cfg->i2c_addr,cfg->bus_speed_hz,&s_instance.dev);if(e!=ESP_OK){memset(&s_instance,0,sizeof(s_instance));return map_err(e);}int r=sensor_init(&s_instance);if(r){bsp_i2c_remove_device(s_instance.dev);memset(&s_instance,0,sizeof(s_instance));LOG_ERR("init FAIL err=%d",r);return r;}s_instance.initialized=true;*h=&s_instance;LOG_INF("init OK addr=0x29 id=0xEBAA range_max=1300mm");return 0;}
-int vl53l4cd_deinit(vl53l4cd_handle_t h){if(h!=&s_instance||!s_instance.initialized)return ERR_NOT_INIT;int r=w8(&s_instance,REG_SYSTEM_START,0U);bsp_i2c_remove_device(s_instance.dev);memset(&s_instance,0,sizeof(s_instance));LOG_INF("deinit %s",r==0?"OK":"FAIL");return r;}
-int vl53l4cd_read(vl53l4cd_handle_t h,vl53l4cd_result_t*out){static const uint8_t map[24]={255,255,255,5,2,4,1,7,3,0,255,255,9,13,255,255,255,255,10,6,255,255,11,12};uint8_t raw;uint16_t distance;if(h!=&s_instance||!out)return ERR_INVALID_PARAM;if(!s_instance.initialized)return ERR_NOT_INIT;memset(out,0,sizeof(*out));TRY(wait_ready(&s_instance,s_instance.cfg.data_ready_timeout_ms));TRY(r8(&s_instance,REG_RANGE_STATUS,&raw));TRY(r16(&s_instance,REG_DISTANCE,&distance));TRY(w8(&s_instance,REG_INTERRUPT_CLEAR,1U));raw&=0x1FU;out->range_status=raw<24U?map[raw]:255U;out->distance_mm=distance;out->valid=out->range_status==0U&&distance<=VL53L4CD_RANGE_MAX_MM;out->out_of_range=!out->valid;return out->valid?0:ERR_VL53L4CD_OUT_OF_RANGE;}
+static int map_err(esp_err_t error)
+{
+    if (error == ESP_OK) {
+        return 0;
+    }
+    if (error == ESP_ERR_TIMEOUT) {
+        return ERR_TIMEOUT;
+    }
+    if (error == ESP_ERR_INVALID_ARG) {
+        return ERR_INVALID_PARAM;
+    }
+    return ERR_VL53L4CD_COMM;
+}
+static uint32_t remaining_timeout_ms(vl53l4cd_ctx_t *ctx, int64_t deadline_us)
+{
+    int64_t remaining_us = deadline_us - esp_timer_get_time();
+    uint32_t timeout_ms;
+
+    if (remaining_us <= 0) {
+        return 0U;
+    }
+    timeout_ms = (uint32_t)((remaining_us + 999LL) / 1000LL);
+    return timeout_ms < ctx->cfg.timeout_ms ? timeout_ms : ctx->cfg.timeout_ms;
+}
+
+static int write_data_timeout(vl53l4cd_ctx_t *ctx,
+                              uint16_t reg,
+                              const uint8_t *data,
+                              size_t length,
+                              uint32_t timeout_ms)
+{
+    uint8_t buffer[32];
+    int64_t deadline_us;
+
+    if (timeout_ms == 0U) {
+        return ERR_TIMEOUT;
+    }
+    deadline_us = esp_timer_get_time() + (int64_t)timeout_ms * 1000LL;
+
+    while (length > 0U) {
+        size_t chunk_length = length > 30U ? 30U : length;
+        uint32_t remaining_ms = remaining_timeout_ms(ctx, deadline_us);
+        esp_err_t error;
+
+        if (remaining_ms == 0U) {
+            return ERR_TIMEOUT;
+        }
+
+        buffer[0] = (uint8_t)(reg >> 8U);
+        buffer[1] = (uint8_t)reg;
+        memcpy(&buffer[2], data, chunk_length);
+        error = bsp_i2c_write(ctx->dev, buffer, chunk_length + 2U,
+                              (int)remaining_ms);
+        if (error != ESP_OK) {
+            LOG_ERR("i2c write FAIL reg=0x%04X err=%s",
+                    reg, esp_err_to_name(error));
+            return map_err(error);
+        }
+
+        reg = (uint16_t)(reg + chunk_length);
+        data += chunk_length;
+        length -= chunk_length;
+    }
+    return 0;
+}
+
+static int write_data(vl53l4cd_ctx_t *ctx, uint16_t reg,
+                      const uint8_t *data, size_t length)
+{
+    return write_data_timeout(ctx, reg, data, length, ctx->cfg.timeout_ms);
+}
+
+static int read_data_timeout(vl53l4cd_ctx_t *ctx,
+                             uint16_t reg,
+                             uint8_t *data,
+                             size_t length,
+                             uint32_t timeout_ms)
+{
+    uint8_t index[2] = {(uint8_t)(reg >> 8U), (uint8_t)reg};
+    esp_err_t error = bsp_i2c_write_read(ctx->dev, index, sizeof(index),
+                                         data, length,
+                                         (int)timeout_ms);
+
+    if (error != ESP_OK) {
+        LOG_ERR("i2c read FAIL reg=0x%04X err=%s",
+                reg, esp_err_to_name(error));
+    }
+    return map_err(error);
+}
+
+static int w8(vl53l4cd_ctx_t *ctx, uint16_t reg, uint8_t value)
+{
+    return write_data(ctx, reg, &value, 1U);
+}
+
+static int w8_timeout(vl53l4cd_ctx_t *ctx, uint16_t reg, uint8_t value,
+                      uint32_t timeout_ms)
+{
+    return write_data_timeout(ctx, reg, &value, 1U, timeout_ms);
+}
+
+static int w16_timeout(vl53l4cd_ctx_t *ctx, uint16_t reg, uint16_t value,
+                       uint32_t timeout_ms)
+{
+    uint8_t data[2] = {(uint8_t)(value >> 8U), (uint8_t)value};
+    return write_data_timeout(ctx, reg, data, sizeof(data), timeout_ms);
+}
+
+static int w32_timeout(vl53l4cd_ctx_t *ctx, uint16_t reg, uint32_t value,
+                       uint32_t timeout_ms)
+{
+    uint8_t data[4] = {
+        (uint8_t)(value >> 24U), (uint8_t)(value >> 16U),
+        (uint8_t)(value >> 8U), (uint8_t)value,
+    };
+    return write_data_timeout(ctx, reg, data, sizeof(data), timeout_ms);
+}
+
+static int r8_timeout(vl53l4cd_ctx_t *ctx, uint16_t reg, uint8_t *value,
+                      uint32_t timeout_ms)
+{
+    return read_data_timeout(ctx, reg, value, 1U, timeout_ms);
+}
+
+static int r16_timeout(vl53l4cd_ctx_t *ctx, uint16_t reg, uint16_t *value,
+                       uint32_t timeout_ms)
+{
+    uint8_t data[2];
+
+    TRY(read_data_timeout(ctx, reg, data, sizeof(data), timeout_ms));
+    *value = ((uint16_t)data[0] << 8U) | data[1];
+    return 0;
+}
+
+static int data_ready_timeout(vl53l4cd_ctx_t *ctx, bool *ready,
+                              uint32_t timeout_ms)
+{
+    uint8_t gpio_status;
+
+    TRY(r8_timeout(ctx, REG_GPIO_STATUS, &gpio_status, timeout_ms));
+    *ready = (gpio_status & 1U) == ctx->ready_level;
+    return 0;
+}
+
+static int wait_ready_until(vl53l4cd_ctx_t *ctx, int64_t deadline_us)
+{
+    while (true) {
+        bool ready;
+        uint32_t timeout_ms = remaining_timeout_ms(ctx, deadline_us);
+        int result;
+
+        if (timeout_ms == 0U) {
+            return ERR_VL53L4CD_DATA_NOT_READY;
+        }
+        result = data_ready_timeout(ctx, &ready, timeout_ms);
+        if (result != 0) {
+            return result == ERR_TIMEOUT && esp_timer_get_time() >= deadline_us
+                       ? ERR_VL53L4CD_DATA_NOT_READY
+                       : result;
+        }
+        if (ready) {
+            return 0;
+        }
+        if (esp_timer_get_time() >= deadline_us) {
+            return ERR_VL53L4CD_DATA_NOT_READY;
+        }
+        timeout_ms = remaining_timeout_ms(ctx, deadline_us);
+        if (timeout_ms == 0U) {
+            return ERR_VL53L4CD_DATA_NOT_READY;
+        }
+        delay_ms(timeout_ms < POLL_MS ? timeout_ms : POLL_MS);
+    }
+}
+
+static int set_range_timing_until(vl53l4cd_ctx_t *ctx, uint32_t timing_ms,
+                                  int64_t deadline_us)
+{
+    uint16_t oscillator_frequency;
+    uint16_t encoded_timeout;
+    uint16_t exponent = 0U;
+    uint32_t timing_budget_us;
+    uint32_t macro_period_us;
+    uint32_t encoded_value;
+    uint32_t scaled_macro_period;
+
+    uint32_t timeout_ms = remaining_timeout_ms(ctx, deadline_us);
+    if (timeout_ms == 0U) return ERR_TIMEOUT;
+    TRY(r16_timeout(ctx, REG_OSC_FREQUENCY, &oscillator_frequency,
+                    timeout_ms));
+    if (oscillator_frequency == 0U || timing_ms < 10U || timing_ms > 200U) {
+        return ERR_INVALID_PARAM;
+    }
+
+    timing_budget_us = timing_ms * 1000U - 2500U;
+    macro_period_us = (uint32_t)(
+        ((uint64_t)2304U * (0x40000000ULL / oscillator_frequency)) >> 6U);
+    timing_budget_us <<= 12U;
+
+    scaled_macro_period = macro_period_us * 16U;
+    encoded_value =
+        ((timing_budget_us + ((scaled_macro_period >> 6U) >> 1U)) /
+         (scaled_macro_period >> 6U)) - 1U;
+    while ((encoded_value & 0xFFFFFF00U) != 0U) {
+        encoded_value >>= 1U;
+        exponent++;
+    }
+    encoded_timeout = (uint16_t)((exponent << 8U) |
+                                 (encoded_value & 0xFFU));
+    timeout_ms = remaining_timeout_ms(ctx, deadline_us);
+    if (timeout_ms == 0U) return ERR_TIMEOUT;
+    TRY(w16_timeout(ctx, REG_RANGE_CONFIG_A, encoded_timeout, timeout_ms));
+
+    exponent = 0U;
+    scaled_macro_period = macro_period_us * 12U;
+    encoded_value =
+        ((timing_budget_us + ((scaled_macro_period >> 6U) >> 1U)) /
+         (scaled_macro_period >> 6U)) - 1U;
+    while ((encoded_value & 0xFFFFFF00U) != 0U) {
+        encoded_value >>= 1U;
+        exponent++;
+    }
+    encoded_timeout = (uint16_t)((exponent << 8U) |
+                                 (encoded_value & 0xFFU));
+    timeout_ms = remaining_timeout_ms(ctx, deadline_us);
+    if (timeout_ms == 0U) return ERR_TIMEOUT;
+    return w16_timeout(ctx, REG_RANGE_CONFIG_B, encoded_timeout, timeout_ms);
+}
+static int sensor_init(vl53l4cd_ctx_t *ctx)
+{
+    int64_t init_deadline_us = esp_timer_get_time() +
+                               (int64_t)VL53L4CD_INIT_TIMEOUT_MS * 1000LL;
+    int64_t firmware_deadline_us;
+    int64_t ready_deadline_us;
+    uint32_t timeout_ms;
+    uint16_t model_id;
+    uint8_t firmware_status;
+    uint8_t gpio_mux;
+
+    timeout_ms = remaining_timeout_ms(ctx, init_deadline_us);
+    if (timeout_ms == 0U) return ERR_TIMEOUT;
+    TRY(r16_timeout(ctx, REG_MODEL_ID, &model_id, timeout_ms));
+    if (model_id != VL53L4CD_MODEL_ID) {
+        LOG_ERR("id_check FAIL expected=0x%04X got=0x%04X",
+                VL53L4CD_MODEL_ID, model_id);
+        return ERR_VL53L4CD_ID_MISMATCH;
+    }
+
+    firmware_deadline_us = esp_timer_get_time() + 1000000LL;
+    if (firmware_deadline_us > init_deadline_us) {
+        firmware_deadline_us = init_deadline_us;
+    }
+    while (true) {
+        uint32_t timeout_ms = remaining_timeout_ms(ctx, firmware_deadline_us);
+
+        if (timeout_ms == 0U) {
+            return ERR_TIMEOUT;
+        }
+        TRY(r8_timeout(ctx, REG_FIRMWARE_STATUS, &firmware_status, timeout_ms));
+        if (firmware_status == 3U) {
+            break;
+        }
+        if (esp_timer_get_time() >= firmware_deadline_us) {
+            return ERR_TIMEOUT;
+        }
+        delay_ms(1U);
+    }
+
+    timeout_ms = remaining_timeout_ms(ctx, init_deadline_us);
+    if (timeout_ms == 0U) return ERR_TIMEOUT;
+    TRY(write_data_timeout(ctx, 0x002DU, s_default_config,
+                           sizeof(s_default_config), timeout_ms));
+    timeout_ms = remaining_timeout_ms(ctx, init_deadline_us);
+    if (timeout_ms == 0U) return ERR_TIMEOUT;
+    TRY(r8_timeout(ctx, REG_GPIO_MUX, &gpio_mux, timeout_ms));
+    ctx->ready_level = ((gpio_mux >> 4U) & 1U) != 0U ? 0U : 1U;
+    timeout_ms = remaining_timeout_ms(ctx, init_deadline_us);
+    if (timeout_ms == 0U) return ERR_TIMEOUT;
+    TRY(w8_timeout(ctx, REG_SYSTEM_START, 0x40U, timeout_ms));
+    ready_deadline_us = esp_timer_get_time() + 1000000LL;
+    if (ready_deadline_us > init_deadline_us) ready_deadline_us = init_deadline_us;
+    TRY(wait_ready_until(ctx, ready_deadline_us));
+
+#define INIT_W8(reg_, value_) do {                                      \
+        timeout_ms = remaining_timeout_ms(ctx, init_deadline_us);       \
+        if (timeout_ms == 0U) return ERR_TIMEOUT;                       \
+        TRY(w8_timeout(ctx, (reg_), (value_), timeout_ms));             \
+    } while (0)
+    INIT_W8(REG_INTERRUPT_CLEAR, 1U);
+    INIT_W8(REG_SYSTEM_START, 0U);
+    INIT_W8(REG_VHV_TIMEOUT, 0x09U);
+    INIT_W8(0x000BU, 0U);
+    timeout_ms = remaining_timeout_ms(ctx, init_deadline_us);
+    if (timeout_ms == 0U) return ERR_TIMEOUT;
+    TRY(w16_timeout(ctx, 0x0024U, 0x0500U, timeout_ms));
+    TRY(set_range_timing_until(ctx, 50U, init_deadline_us));
+    timeout_ms = remaining_timeout_ms(ctx, init_deadline_us);
+    if (timeout_ms == 0U) return ERR_TIMEOUT;
+    TRY(w32_timeout(ctx, REG_INTERMEASUREMENT, 0U, timeout_ms));
+    INIT_W8(REG_SYSTEM_START, 0x21U);
+    ready_deadline_us = esp_timer_get_time() + 1000000LL;
+    if (ready_deadline_us > init_deadline_us) ready_deadline_us = init_deadline_us;
+    TRY(wait_ready_until(ctx, ready_deadline_us));
+    timeout_ms = remaining_timeout_ms(ctx, init_deadline_us);
+    if (timeout_ms == 0U) return ERR_TIMEOUT;
+#undef INIT_W8
+    return w8_timeout(ctx, REG_INTERRUPT_CLEAR, 1U, timeout_ms);
+}
+int vl53l4cd_init(vl53l4cd_handle_t *handle, const vl53l4cd_cfg_t *cfg)
+{
+    esp_err_t error = ESP_OK;
+    int result;
+
+    if (handle == NULL || cfg == NULL || s_instance.allocated ||
+        cfg->i2c_addr != VL53L4CD_I2C_ADDR_DEFAULT ||
+        cfg->bus_speed_hz == 0U ||
+        cfg->bus_speed_hz > VL53L4CD_BUS_SPEED_HZ ||
+        cfg->timeout_ms == 0U || cfg->data_ready_timeout_ms == 0U) {
+        return ERR_INVALID_PARAM;
+    }
+
+    *handle = NULL;
+    memset(&s_instance, 0, sizeof(s_instance));
+    s_instance.allocated = true;
+    s_instance.cfg = *cfg;
+
+    error = bsp_i2c_add_device_7bit(cfg->i2c_addr, cfg->bus_speed_hz,
+                                    &s_instance.dev);
+    if (error != ESP_OK) {
+        memset(&s_instance, 0, sizeof(s_instance));
+        return map_err(error);
+    }
+
+    result = sensor_init(&s_instance);
+    if (result != 0) {
+        bsp_i2c_remove_device(s_instance.dev);
+        memset(&s_instance, 0, sizeof(s_instance));
+        LOG_ERR("init FAIL err=%d", result);
+        return result;
+    }
+
+    s_instance.initialized = true;
+    *handle = &s_instance;
+    LOG_INF("init OK addr=0x29 id=0xEBAA range_max=1300mm");
+    return 0;
+}
+
+int vl53l4cd_deinit(vl53l4cd_handle_t handle)
+{
+    int result;
+
+    if (handle != &s_instance || !s_instance.initialized) {
+        return ERR_NOT_INIT;
+    }
+
+    result = w8(&s_instance, REG_SYSTEM_START, 0U);
+    bsp_i2c_remove_device(s_instance.dev);
+    memset(&s_instance, 0, sizeof(s_instance));
+    LOG_INF("deinit %s", result == 0 ? "OK" : "FAIL");
+    return result;
+}
+static int read_measurement_once(vl53l4cd_ctx_t *ctx,
+                                 vl53l4cd_result_t *result,
+                                 int64_t deadline_us)
+{
+    static const uint8_t status_map[24] = {
+        255U, 255U, 255U, 5U, 2U, 4U, 1U, 7U,
+        3U, 0U, 255U, 255U, 9U, 13U, 255U, 255U,
+        255U, 255U, 10U, 6U, 255U, 255U, 11U, 12U,
+    };
+    uint8_t raw_status;
+    uint16_t distance_mm;
+    uint32_t timeout_ms;
+
+    TRY(wait_ready_until(ctx, deadline_us));
+    timeout_ms = remaining_timeout_ms(ctx, deadline_us);
+    if (timeout_ms == 0U) {
+        return ERR_TIMEOUT;
+    }
+    TRY(r8_timeout(ctx, REG_RANGE_STATUS, &raw_status, timeout_ms));
+    timeout_ms = remaining_timeout_ms(ctx, deadline_us);
+    if (timeout_ms == 0U) {
+        return ERR_TIMEOUT;
+    }
+    TRY(r16_timeout(ctx, REG_DISTANCE, &distance_mm, timeout_ms));
+    timeout_ms = remaining_timeout_ms(ctx, deadline_us);
+    if (timeout_ms == 0U) {
+        return ERR_TIMEOUT;
+    }
+    TRY(w8_timeout(ctx, REG_INTERRUPT_CLEAR, 1U, timeout_ms));
+
+    raw_status &= 0x1FU;
+    result->range_status = raw_status < 24U ? status_map[raw_status] : 255U;
+    result->distance_mm = distance_mm;
+    result->valid = result->range_status == 0U &&
+                    distance_mm <= VL53L4CD_RANGE_MAX_MM;
+    result->out_of_range = !result->valid;
+    return result->valid ? 0 : ERR_VL53L4CD_OUT_OF_RANGE;
+}
+
+int vl53l4cd_read(vl53l4cd_handle_t handle, vl53l4cd_result_t *result)
+{
+    int64_t deadline_us;
+    int read_result = ERR_VL53L4CD_COMM;
+
+    if (handle != &s_instance || result == NULL) {
+        return ERR_INVALID_PARAM;
+    }
+    if (!s_instance.initialized) {
+        return ERR_NOT_INIT;
+    }
+    deadline_us = esp_timer_get_time() +
+                  (int64_t)s_instance.cfg.data_ready_timeout_ms * 1000LL;
+
+    /* 默认只重试完整测距一次；越界是完成的结果，不重试。 */
+    for (uint32_t attempt = 0U;
+         attempt < VL53L4CD_READ_MAX_ATTEMPTS;
+         ++attempt) {
+        memset(result, 0, sizeof(*result));
+        read_result = read_measurement_once(&s_instance, result, deadline_us);
+        if (read_result == 0 || read_result == ERR_VL53L4CD_OUT_OF_RANGE) {
+            return read_result;
+        }
+    }
+
+    return read_result;
+}

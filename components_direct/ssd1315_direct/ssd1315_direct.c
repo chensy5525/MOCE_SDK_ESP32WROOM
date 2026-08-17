@@ -11,6 +11,7 @@
 
 #include "bsp_i2c.h"
 #include "esp_err.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -22,9 +23,10 @@
 #define SSD1315_PAGE_COMMAND_SIZE   3U
 #define SSD1315_FONT_GLYPH_COUNT    36U
 #define SSD1315_FONT_LETTER_OFFSET  10U
-#define SSD1315_RETRY_DELAY_MS      1U
 #define SSD1315_CMD_DISPLAY_OFF     0xAEU
 #define SSD1315_CMD_DISPLAY_ON      0xAFU
+#define SSD1315_CMD_MEMORY_MODE     0x20U
+#define SSD1315_VAL_PAGE_MODE       0x02U
 #define SSD1315_CMD_CLOCK_DIV       0xD5U
 #define SSD1315_VAL_CLOCK_DIV       0x90U
 #define SSD1315_CMD_MULTIPLEX       0xA8U
@@ -54,8 +56,6 @@
 /* 日志统一从调试串口输出固定格式。 */
 #define SSD1315_LOG_INF(format, ...) \
     printf("[INF][" SSD1315_TAG "] " format "\n", ##__VA_ARGS__)
-#define SSD1315_LOG_WRN(format, ...) \
-    printf("[WRN][" SSD1315_TAG "] " format "\n", ##__VA_ARGS__)
 #define SSD1315_LOG_ERR(format, ...) \
     printf("[ERR][" SSD1315_TAG "] " format "\n", ##__VA_ARGS__)
 
@@ -68,8 +68,6 @@ typedef struct ssd1315_ctx {
     bool initialized;
     uint8_t dirty_pages;
     uint8_t framebuffer[SSD1315_FRAMEBUFFER_SIZE];
-    uint32_t ok_count;
-    uint32_t error_count;
 } ssd1315_ctx_t;
 
 /* 禁止动态内存，因此当前直连驱动提供一个静态实例。 */
@@ -136,11 +134,27 @@ static int ssd1315_map_esp_error(esp_err_t error)
     return ERR_NO_DEVICE;
 }
 
-static int ssd1315_write_i2c(ssd1315_handle_t handle, uint8_t control,
-                             const uint8_t *data, size_t len)
+static uint32_t ssd1315_remaining_timeout_ms(int64_t deadline_us)
+{
+    int64_t remaining_us = deadline_us - esp_timer_get_time();
+    uint32_t timeout_ms;
+
+    if (remaining_us <= 0) {
+        return 0U;
+    }
+    timeout_ms = (uint32_t)((remaining_us + 999LL) / 1000LL);
+    return timeout_ms < SSD1315_I2C_TIMEOUT_MS
+               ? timeout_ms
+               : SSD1315_I2C_TIMEOUT_MS;
+}
+
+static int ssd1315_write_i2c_timeout(ssd1315_handle_t handle, uint8_t control,
+                                     const uint8_t *data, size_t len,
+                                     uint32_t timeout_ms)
 {
     uint8_t transfer[SSD1315_TRANSFER_MAX_SIZE];
-    esp_err_t error = ESP_FAIL;
+    int64_t deadline_us;
+    esp_err_t error = ESP_ERR_TIMEOUT;
     uint32_t attempt;
 
     if (handle == NULL || data == NULL || len == 0U) {
@@ -153,21 +167,30 @@ static int ssd1315_write_i2c(ssd1315_handle_t handle, uint8_t control,
     transfer[0] = control;
     memcpy(&transfer[1], data, len);
 
-    for (attempt = 0U; attempt < SSD1315_MAX_RETRIES; ++attempt) {
+    deadline_us = esp_timer_get_time() + (int64_t)timeout_ms * 1000LL;
+    for (attempt = 0U; attempt < SSD1315_WRITE_MAX_ATTEMPTS; ++attempt) {
+        uint32_t remaining_ms = ssd1315_remaining_timeout_ms(deadline_us);
+
+        if (remaining_ms == 0U) {
+            return ERR_TIMEOUT;
+        }
         error = bsp_i2c_write(handle->i2c_device, transfer, len + 1U,
-                              (int)SSD1315_I2C_TIMEOUT_MS);
+                              (int)remaining_ms);
         if (error == ESP_OK) {
-            handle->ok_count++;
             return 0;
         }
-        handle->error_count++;
-        if (attempt + 1U < SSD1315_MAX_RETRIES) {
-            SSD1315_LOG_WRN("i2c retry=%lu", (unsigned long)(attempt + 1U));
+        if (attempt + 1U < SSD1315_WRITE_MAX_ATTEMPTS) {
             vTaskDelay(pdMS_TO_TICKS(SSD1315_RETRY_DELAY_MS));
         }
     }
-
     return ssd1315_map_esp_error(error);
+}
+
+static int ssd1315_write_i2c(ssd1315_handle_t handle, uint8_t control,
+                             const uint8_t *data, size_t len)
+{
+    return ssd1315_write_i2c_timeout(handle, control, data, len,
+                                     SSD1315_I2C_TIMEOUT_MS);
 }
 
 static int ssd1315_write_commands(ssd1315_handle_t handle,
@@ -179,10 +202,23 @@ static int ssd1315_write_commands(ssd1315_handle_t handle,
     return ssd1315_write_i2c(handle, SSD1315_CONTROL_COMMAND, commands, len);
 }
 
-static int ssd1315_write_data(ssd1315_handle_t handle,
-                              const uint8_t *data, size_t len)
+static int ssd1315_write_commands_timeout(ssd1315_handle_t handle,
+                                          const uint8_t *commands, size_t len,
+                                          uint32_t timeout_ms)
 {
-    return ssd1315_write_i2c(handle, SSD1315_CONTROL_DATA, data, len);
+    if (len > SSD1315_COMMAND_MAX_SIZE) {
+        return ERR_OVERFLOW;
+    }
+    return ssd1315_write_i2c_timeout(handle, SSD1315_CONTROL_COMMAND,
+                                     commands, len, timeout_ms);
+}
+
+static int ssd1315_write_data_timeout(ssd1315_handle_t handle,
+                                      const uint8_t *data, size_t len,
+                                      uint32_t timeout_ms)
+{
+    return ssd1315_write_i2c_timeout(handle, SSD1315_CONTROL_DATA,
+                                     data, len, timeout_ms);
 }
 
 static const uint8_t *ssd1315_get_glyph(char character)
@@ -208,12 +244,6 @@ static int ssd1315_configure_i2c_device(ssd1315_handle_t handle,
 {
     esp_err_t error;
 
-    if (cfg->initialize_i2c || !bsp_i2c_is_initialized()) {
-        error = bsp_i2c_init();
-        if (error != ESP_OK) {
-            return ssd1315_map_esp_error(error);
-        }
-    }
     error = bsp_i2c_add_device_7bit(cfg->i2c_addr, cfg->clk_speed_hz,
                                     &handle->i2c_device);
     return ssd1315_map_esp_error(error);
@@ -227,6 +257,7 @@ int ssd1315_init_device(ssd1315_handle_t *handle, const ssd1315_cfg_t *cfg)
 {
     static const uint8_t s_init_commands[] = {
         SSD1315_CMD_DISPLAY_OFF,
+        SSD1315_CMD_MEMORY_MODE, SSD1315_VAL_PAGE_MODE,
         SSD1315_CMD_CLOCK_DIV, SSD1315_VAL_CLOCK_DIV,
         SSD1315_CMD_MULTIPLEX, SSD1315_VAL_MULTIPLEX,
         SSD1315_CMD_DISPLAY_OFFSET, SSD1315_VAL_DISPLAY_OFFSET,
@@ -299,6 +330,8 @@ int ssd1315_init_device(ssd1315_handle_t *handle, const ssd1315_cfg_t *cfg)
         return result;
     }
 
+    /* Give the panel one documented startup interval after DISPLAY_ON before
+     * the example performs its first visible update. */
     vTaskDelay(pdMS_TO_TICKS(SSD1315_STARTUP_MS));
     *handle = &s_ctx;
     SSD1315_LOG_INF("init OK, addr=0x%02X", s_ctx.i2c_addr);
@@ -376,6 +409,7 @@ int ssd1315_draw_text(ssd1315_handle_t handle, uint8_t x, uint8_t page,
 
 int ssd1315_refresh_display(ssd1315_handle_t handle)
 {
+    int64_t deadline_us;
     uint8_t page;
     uint8_t page_commands[SSD1315_PAGE_COMMAND_SIZE];
     int result;
@@ -386,6 +420,8 @@ int ssd1315_refresh_display(ssd1315_handle_t handle)
     if (handle->dirty_pages == 0U) {
         return 0;
     }
+    deadline_us = esp_timer_get_time() +
+                  (int64_t)SSD1315_REFRESH_TIMEOUT_MS * 1000LL;
 
     for (page = 0U; page < SSD1315_PAGE_COUNT; ++page) {
         if ((handle->dirty_pages & (uint8_t)(1U << page)) == 0U) {
@@ -395,16 +431,24 @@ int ssd1315_refresh_display(ssd1315_handle_t handle)
         page_commands[1] = SSD1315_CMD_COLUMN_LOW;
         page_commands[2] = SSD1315_CMD_COLUMN_HIGH;
 
-        result = ssd1315_write_commands(handle, page_commands,
-                                        sizeof(page_commands));
+        uint32_t timeout_ms = ssd1315_remaining_timeout_ms(deadline_us);
+
+        if (timeout_ms == 0U) {
+            return ERR_TIMEOUT;
+        }
+        result = ssd1315_write_commands_timeout(
+            handle, page_commands, sizeof(page_commands), timeout_ms);
         if (result != 0) {
             SSD1315_LOG_ERR("refresh FAIL, page=%u err=%d", page, result);
             return result;
         }
-        result = ssd1315_write_data(
-            handle,
-            &handle->framebuffer[(uint16_t)page * SSD1315_PAGE_SIZE],
-            SSD1315_PAGE_SIZE);
+        timeout_ms = ssd1315_remaining_timeout_ms(deadline_us);
+        if (timeout_ms == 0U) {
+            return ERR_TIMEOUT;
+        }
+        result = ssd1315_write_data_timeout(
+            handle, &handle->framebuffer[(uint16_t)page * SSD1315_PAGE_SIZE],
+            SSD1315_PAGE_SIZE, timeout_ms);
         if (result != 0) {
             SSD1315_LOG_ERR("refresh FAIL, page=%u err=%d", page, result);
             return result;

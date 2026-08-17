@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "ssd1315_direct.c"
     INCLUDE_DIRS "include"
-    REQUIRES bsp_i2c freertos
+    REQUIRES bsp_i2c esp_timer freertos module_errors
 )

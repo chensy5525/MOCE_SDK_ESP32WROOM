@@ -61,6 +61,10 @@ typedef struct {
     uint32_t discovery_window_ms;
     uint32_t assign_ack_timeout_ms;
     uint32_t transfer_ack_timeout_ms;
+    uint16_t discovery_query_interval_ms;
+    uint16_t discovery_quiet_ms;
+    uint8_t  discovery_min_rounds;
+    uint8_t  _reserved[3];
 } ch32_uart_dynamic_config_t;
 
 void ch32_uart_dynamic_default_config(ch32_uart_dynamic_config_t *cfg);

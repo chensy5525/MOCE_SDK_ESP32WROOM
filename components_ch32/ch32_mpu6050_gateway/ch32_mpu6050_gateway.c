@@ -2,7 +2,7 @@
  * Registers: InvenSense RM-MPU-6000A-00 Rev.4.2.
  * Discovery owns the stable node; this component never accesses CAN directly.
  */
-#include "mpu6050.h"
+#include "ch32_mpu6050_gateway.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -15,10 +15,8 @@
 #define LOGI(f, ...) printf("[INF][" TAG "] " f "\n", ##__VA_ARGS__)
 #define LOGW(f, ...) printf("[WRN][" TAG "] " f "\n", ##__VA_ARGS__)
 #define LOGE(f, ...) printf("[ERR][" TAG "] " f "\n", ##__VA_ARGS__)
-#define RETRIES 3U
-#define RETRY_MS 2U
 #define RESET_MS 100U
-#define SAMPLE_MS (1000U / MPU6050_SAMPLE_RATE_HZ)
+#define SAMPLE_MS (1000U / CH32_MPU6050_SAMPLE_RATE_HZ)
 #define BURST_LEN 14U
 #define WHO_VALUE 0x68U
 #define REG_SMPLRT_DIV 0x19U
@@ -38,17 +36,27 @@ typedef struct {
     float ax, ay, az, gx, gy, gz;
 } sample_t;
 
-struct mpu6050_ctx {
+struct ch32_mpu6050_ctx {
     ch32_i2c_multi_node_t *node;
     uint8_t addr;
-    uint32_t timeout_ms;
     float alpha, bx, by, bz, roll, pitch, yaw;
     int64_t last_us;
-    uint32_t samples, ok_count, error_count;
+    uint32_t samples;
     bool in_use, initialized, seeded;
 };
 
-static struct mpu6050_ctx s_ctx[MPU6050_MAX_BRIDGE_INSTANCES];
+static struct ch32_mpu6050_ctx s_ctx[CH32_MPU6050_MAX_INSTANCES];
+
+static uint32_t now_ms(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000LL);
+}
+
+static uint32_t remaining_ms(uint32_t deadline)
+{
+    uint32_t now = now_ms();
+    return (int32_t)(deadline - now) > 0 ? deadline - now : 0U;
+}
 
 static bool node_valid(const ch32_i2c_multi_node_t *node)
 {
@@ -80,50 +88,39 @@ static float wrap(float degrees)
     return degrees;
 }
 
-static int write_reg(mpu6050_handle_t h, uint8_t reg, uint8_t value)
+static int write_reg(ch32_mpu6050_handle_t h, uint8_t reg, uint8_t value)
 {
-    ch32_i2c_multi_result_t gr = CH32_I2C_MULTI_RESULT_COMM_FAIL;
     if (!node_valid(h->node)) return ERR_NO_DEVICE;
-    for (uint32_t attempt = 1U; attempt <= RETRIES; ++attempt) {
-        gr = ch32_i2c_multi_write_reg_to(h->node, h->addr, reg, &value, 1U);
-        if (gr == CH32_I2C_MULTI_RESULT_OK) {
-            h->ok_count++;
-            return 0;
-        }
-        h->error_count++;
-        LOGW("downstream write retry=%lu token=0x%04X node=%u reg=0x%02X result=%s",
-             (unsigned long)attempt, h->node->token, h->node->node_id, reg,
-             ch32_i2c_multi_result_text(gr));
-        if (attempt < RETRIES) vTaskDelay(pdMS_TO_TICKS(RETRY_MS));
-    }
-    return map_result(gr);
+    return map_result(ch32_i2c_multi_write_reg_to(
+        h->node, h->addr, reg, &value, 1U));
 }
 
-static int read_regs(mpu6050_handle_t h, uint8_t reg, uint8_t *data, uint8_t len)
+static int read_regs(ch32_mpu6050_handle_t h, uint8_t reg, uint8_t *data,
+                     uint8_t len)
 {
-    ch32_i2c_multi_result_t gr = CH32_I2C_MULTI_RESULT_COMM_FAIL;
     if (data == NULL || len == 0U) return ERR_INVALID_PARAM;
     if (!node_valid(h->node)) return ERR_NO_DEVICE;
-    for (uint32_t attempt = 1U; attempt <= RETRIES; ++attempt) {
-        /* Gateway uses a nonzero request_id and waits for all chunks + DONE. */
-        gr = ch32_i2c_multi_read_regs_from(h->node, h->addr, reg, data, len);
-        if (gr == CH32_I2C_MULTI_RESULT_OK) {
-            h->ok_count++;
-            return 0;
-        }
-        h->error_count++;
-        LOGW("downstream read retry=%lu token=0x%04X node=%u reg=0x%02X result=%s",
-             (unsigned long)attempt, h->node->token, h->node->node_id, reg,
-             ch32_i2c_multi_result_text(gr));
-        if (attempt < RETRIES) vTaskDelay(pdMS_TO_TICKS(RETRY_MS));
-    }
-    return map_result(gr);
+    return map_result(ch32_i2c_multi_read_regs_from(
+        h->node, h->addr, reg, data, len));
 }
 
-static int read_sample(mpu6050_handle_t h, sample_t *s)
+static int read_regs_timeout(ch32_mpu6050_handle_t h, uint8_t reg, uint8_t *data,
+                             uint8_t len, uint32_t timeout_ms)
+{
+    if (data == NULL || len == 0U || timeout_ms == 0U) {
+        return ERR_INVALID_PARAM;
+    }
+    if (!node_valid(h->node)) return ERR_NO_DEVICE;
+    return map_result(ch32_i2c_multi_read_regs_from_timeout(
+        h->node, h->addr, reg, data, len, timeout_ms));
+}
+
+static int read_sample_timeout(ch32_mpu6050_handle_t h, sample_t *s,
+                               uint32_t timeout_ms)
 {
     uint8_t data[BURST_LEN];
-    int result = read_regs(h, REG_ACCEL_XOUT_H, data, sizeof(data));
+    int result = read_regs_timeout(
+        h, REG_ACCEL_XOUT_H, data, sizeof(data), timeout_ms);
     if (result != 0) return result;
     s->ax = (float)be_i16(&data[0]) / ACCEL_LSB_G;
     s->ay = (float)be_i16(&data[2]) / ACCEL_LSB_G;
@@ -134,7 +131,23 @@ static int read_sample(mpu6050_handle_t h, sample_t *s)
     return 0;
 }
 
-static int configure(mpu6050_handle_t h)
+static int read_sample_until(ch32_mpu6050_handle_t h, sample_t *sample,
+                             uint32_t deadline)
+{
+    int result = ERR_NO_DEVICE;
+
+    for (uint32_t attempt = 0U;
+         attempt < CH32_MPU6050_SAMPLE_MAX_ATTEMPTS;
+         ++attempt) {
+        uint32_t remaining = remaining_ms(deadline);
+        if (remaining == 0U) return ERR_TIMEOUT;
+        result = read_sample_timeout(h, sample, remaining);
+        if (result == 0) return 0;
+    }
+    return result;
+}
+
+static int configure(ch32_mpu6050_handle_t h)
 {
     uint8_t who = 0U;
     int result = write_reg(h, REG_PWR_MGMT_1, 0x80U);
@@ -144,7 +157,7 @@ static int configure(mpu6050_handle_t h)
     if (result != 0) return result;
     if (who != WHO_VALUE) {
         LOGE("init FAIL, stage=identify expected=0x%02X got=0x%02X", WHO_VALUE, who);
-        return ERR_MPU6050_ID_MISMATCH;
+        return ERR_CH32_MPU6050_ID_MISMATCH;
     }
     if ((result = write_reg(h, REG_PWR_MGMT_1, 0x01U)) != 0) return result;
     if ((result = write_reg(h, REG_PWR_MGMT_2, 0x00U)) != 0) return result;
@@ -154,44 +167,55 @@ static int configure(mpu6050_handle_t h)
     return write_reg(h, REG_ACCEL_CONFIG, 0x00U);
 }
 
-static int calibrate(mpu6050_handle_t h, uint16_t count)
+static int calibrate(ch32_mpu6050_handle_t h, uint16_t count)
 {
     sample_t s;
     float sx = 0.0f, sy = 0.0f, sz = 0.0f;
     uint16_t valid = 0U;
+    uint16_t consecutive_failures = 0U;
+    uint32_t deadline = now_ms() + CH32_MPU6050_CALIBRATION_TIMEOUT_MS;
     for (uint16_t i = 0U; i < count; ++i) {
-        if (read_sample(h, &s) == 0) {
+        if (remaining_ms(deadline) == 0U) break;
+        if (read_sample_until(h, &s, deadline) == 0) {
             sx += s.gx; sy += s.gy; sz += s.gz; valid++;
+            consecutive_failures = 0U;
+        } else if (++consecutive_failures >= 3U) {
+            break;
         }
+        if ((uint16_t)(valid + count - i - 1U) < CAL_MIN) break;
         vTaskDelay(pdMS_TO_TICKS(SAMPLE_MS));
     }
-    if (valid < CAL_MIN || valid < count / 2U) return ERR_MPU6050_CALIBRATION;
+    if (valid < CAL_MIN || valid < count / 2U) {
+        return ERR_CH32_MPU6050_CALIBRATION;
+    }
     h->bx = sx / valid; h->by = sy / valid; h->bz = sz / valid;
     LOGI("calibration OK, token=0x%04X samples=%u", h->node->token, valid);
     return 0;
 }
 
-int mpu6050_init_device(mpu6050_handle_t *handle, const mpu6050_cfg_t *cfg)
+int ch32_mpu6050_init(ch32_mpu6050_handle_t *handle,
+                      const ch32_mpu6050_cfg_t *cfg)
 {
-    mpu6050_handle_t h = NULL;
+    ch32_mpu6050_handle_t h = NULL;
     bool found = false;
     int result;
     if (handle == NULL || cfg == NULL) return ERR_INVALID_PARAM;
     *handle = NULL;
-    if (!node_valid(cfg->ch32_node) || cfg->i2c_addr != MPU6050_I2C_ADDR ||
-        cfg->clk_speed_hz != MPU6050_I2C_FREQ_HZ || cfg->bridge_timeout_ms == 0U ||
+    if (!node_valid(cfg->ch32_node) ||
+        cfg->i2c_addr != CH32_MPU6050_I2C_ADDR ||
+        cfg->clk_speed_hz != CH32_MPU6050_I2C_FREQ_HZ ||
         cfg->calibration_samples < CAL_MIN || cfg->complementary_alpha < 0.0f ||
         cfg->complementary_alpha > 1.0f) {
         LOGE("init FAIL, stage=module reason=invalid_config");
         return ERR_INVALID_PARAM;
     }
-    for (size_t i = 0U; i < MPU6050_MAX_BRIDGE_INSTANCES; ++i) {
+    for (size_t i = 0U; i < CH32_MPU6050_MAX_INSTANCES; ++i) {
         if (!s_ctx[i].in_use) { h = &s_ctx[i]; break; }
     }
     if (h == NULL) return ERR_BUSY;
     memset(h, 0, sizeof(*h));
     h->in_use = true; h->node = cfg->ch32_node; h->addr = cfg->i2c_addr;
-    h->timeout_ms = cfg->bridge_timeout_ms; h->alpha = cfg->complementary_alpha;
+    h->alpha = cfg->complementary_alpha;
 
     if (ch32_i2c_multi_set_speed_400k(h->node) != CH32_I2C_MULTI_RESULT_OK) {
         result = ERR_NO_DEVICE;
@@ -214,14 +238,15 @@ int mpu6050_init_device(mpu6050_handle_t *handle, const mpu6050_cfg_t *cfg)
     }
     h->initialized = true; h->last_us = esp_timer_get_time(); *handle = h;
     LOGI("init OK, token=0x%04X node=%u addr=0x%02X rate=%uHz",
-         h->node->token, h->node->node_id, h->addr, MPU6050_SAMPLE_RATE_HZ);
+         h->node->token, h->node->node_id, h->addr,
+         CH32_MPU6050_SAMPLE_RATE_HZ);
     return 0;
 fail:
     memset(h, 0, sizeof(*h));
     return result;
 }
 
-int mpu6050_deinit_device(mpu6050_handle_t h)
+int ch32_mpu6050_deinit(ch32_mpu6050_handle_t h)
 {
     if (h == NULL || !h->in_use || !h->initialized) return ERR_NOT_INIT;
     LOGI("deinit OK, token=0x%04X", h->node->token);
@@ -229,33 +254,48 @@ int mpu6050_deinit_device(mpu6050_handle_t h)
     return 0;
 }
 
-int mpu6050_read_orientation(mpu6050_handle_t h, mpu6050_orientation_t *o)
+int ch32_mpu6050_read_orientation(
+    ch32_mpu6050_handle_t h, ch32_mpu6050_orientation_t *o)
 {
     sample_t s;
-    float norm, ar, ap, dt, gr, gp;
+    float norm, ar = 0.0f, ap = 0.0f, dt, gr, gp;
     int64_t now;
     int result;
     if (h == NULL || !h->in_use || !h->initialized) return ERR_NOT_INIT;
     if (o == NULL) return ERR_INVALID_PARAM;
     memset(o, 0, sizeof(*o));
     if (!node_valid(h->node)) return ERR_NO_DEVICE;
-    if ((result = read_sample(h, &s)) != 0) {
+    if ((result = read_sample_until(
+             h, &s, now_ms() + CH32_MPU6050_READ_TIMEOUT_MS)) != 0) {
         LOGE("run FAIL, stage=downstream_read token=0x%04X node=%u err=%d",
              h->node->token, h->node->node_id, result);
         return result;
     }
     norm = sqrtf(s.ax * s.ax + s.ay * s.ay + s.az * s.az);
-    if (!isfinite(norm) || norm < 0.5f || norm > 1.5f) return ERR_MPU6050_DATA_INVALID;
-    ar = atan2f(s.ay, s.az) * RAD_DEG;
-    ap = atan2f(-s.ax, sqrtf(s.ay * s.ay + s.az * s.az)) * RAD_DEG;
+    o->accel_correction_used = isfinite(norm) && norm >= 0.5f && norm <= 1.5f;
+    if (o->accel_correction_used) {
+        ar = atan2f(s.ay, s.az) * RAD_DEG;
+        ap = atan2f(-s.ax, sqrtf(s.ay * s.ay + s.az * s.az)) * RAD_DEG;
+    } else if (!h->seeded) {
+        return ERR_CH32_MPU6050_DATA_INVALID;
+    }
     now = esp_timer_get_time(); dt = (float)(now - h->last_us) / 1000000.0f; h->last_us = now;
-    if (!h->seeded || dt <= 0.0f || dt > 0.1f) {
+    if (!h->seeded) {
         h->roll = ar; h->pitch = ap; h->seeded = true;
+    } else if (dt <= 0.0f || dt > 0.1f) {
+        if (o->accel_correction_used) {
+            h->roll = ar;
+            h->pitch = ap;
+        } else {
+            return ERR_CH32_MPU6050_DATA_INVALID;
+        }
     } else {
         gr = h->roll + (s.gx - h->bx) * dt;
         gp = h->pitch + (s.gy - h->by) * dt;
-        h->roll = h->alpha * gr + (1.0f - h->alpha) * ar;
-        h->pitch = h->alpha * gp + (1.0f - h->alpha) * ap;
+        h->roll = o->accel_correction_used
+                      ? h->alpha * gr + (1.0f - h->alpha) * ar : gr;
+        h->pitch = o->accel_correction_used
+                       ? h->alpha * gp + (1.0f - h->alpha) * ap : gp;
         h->yaw = wrap(h->yaw + (s.gz - h->bz) * dt);
     }
     h->samples++;

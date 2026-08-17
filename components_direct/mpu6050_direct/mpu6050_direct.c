@@ -17,8 +17,7 @@
 #include "freertos/task.h"
 
 #define MPU6050_TAG                   "MPU6050"
-#define MPU6050_MAX_RETRIES           3U
-#define MPU6050_RETRY_DELAY_MS        2U
+#define MPU6050_SAMPLE_MAX_ATTEMPTS   2U
 #define MPU6050_RESET_DELAY_MS        100U
 #define MPU6050_SAMPLE_DELAY_MS       (1000U / MPU6050_SAMPLE_RATE_HZ)
 #define MPU6050_SAMPLE_BURST_LEN      14U
@@ -48,11 +47,10 @@
 #define MPU6050_ACCEL_NORM_MAX_G      1.5f
 #define MPU6050_MAX_DELTA_TIME_S      0.1f
 #define MPU6050_MIN_CALIBRATION_COUNT 20U
+#define MPU6050_CALIBRATION_MAX_CONSECUTIVE_FAILURES 3U
 
 #define MPU6050_LOG_INF(format, ...) \
     printf("[INF][" MPU6050_TAG "] " format "\n", ##__VA_ARGS__)
-#define MPU6050_LOG_WRN(format, ...) \
-    printf("[WRN][" MPU6050_TAG "] " format "\n", ##__VA_ARGS__)
 #define MPU6050_LOG_ERR(format, ...) \
     printf("[ERR][" MPU6050_TAG "] " format "\n", ##__VA_ARGS__)
 
@@ -78,8 +76,6 @@ typedef struct mpu6050_ctx {
     float yaw_deg;
     int64_t last_update_us;
     uint32_t sample_count;
-    uint32_t ok_count;
-    uint32_t error_count;
     bool initialized;
     bool filter_seeded;
 } mpu6050_ctx_t;
@@ -123,58 +119,53 @@ static float mpu6050_wrap_angle(float angle_deg)
 static int mpu6050_write_register(mpu6050_handle_t handle, uint8_t reg,
                                   uint8_t value)
 {
-    esp_err_t error = ESP_FAIL;
+    esp_err_t error;
 
-    for (uint32_t attempt = 0U; attempt < MPU6050_MAX_RETRIES; ++attempt) {
-        error = bsp_i2c_write_reg_byte(handle->i2c_device, reg, value,
-                                       (int)handle->timeout_ms);
-        if (error == ESP_OK) {
-            handle->ok_count++;
-            return 0;
-        }
-        handle->error_count++;
-        if (attempt + 1U < MPU6050_MAX_RETRIES) {
-            MPU6050_LOG_WRN("i2c write retry=%lu reg=0x%02X",
-                            (unsigned long)(attempt + 1U), reg);
-            vTaskDelay(pdMS_TO_TICKS(MPU6050_RETRY_DELAY_MS));
-        }
+    error = bsp_i2c_write_reg_byte(handle->i2c_device, reg, value,
+                                   (int)handle->timeout_ms);
+    return mpu6050_map_esp_error(error);
+}
+
+static uint32_t mpu6050_remaining_timeout_ms(int64_t deadline_us)
+{
+    int64_t remaining_us = deadline_us - esp_timer_get_time();
+
+    if (remaining_us <= 0) {
+        return 0U;
     }
+    return (uint32_t)((remaining_us + 999LL) / 1000LL);
+}
+
+static int mpu6050_read_registers_timeout(mpu6050_handle_t handle, uint8_t reg,
+                                          uint8_t *data, size_t len,
+                                          uint32_t timeout_ms)
+{
+    esp_err_t error;
+
+    if (data == NULL || len == 0U) {
+        return ERR_INVALID_PARAM;
+    }
+    error = bsp_i2c_read_reg(handle->i2c_device, reg, data, len,
+                             (int)timeout_ms);
     return mpu6050_map_esp_error(error);
 }
 
 static int mpu6050_read_registers(mpu6050_handle_t handle, uint8_t reg,
                                   uint8_t *data, size_t len)
 {
-    esp_err_t error = ESP_FAIL;
-
-    if (data == NULL || len == 0U) {
-        return ERR_INVALID_PARAM;
-    }
-    for (uint32_t attempt = 0U; attempt < MPU6050_MAX_RETRIES; ++attempt) {
-        error = bsp_i2c_read_reg(handle->i2c_device, reg, data, len,
-                                 (int)handle->timeout_ms);
-        if (error == ESP_OK) {
-            handle->ok_count++;
-            return 0;
-        }
-        handle->error_count++;
-        if (attempt + 1U < MPU6050_MAX_RETRIES) {
-            MPU6050_LOG_WRN("i2c read retry=%lu reg=0x%02X",
-                            (unsigned long)(attempt + 1U), reg);
-            vTaskDelay(pdMS_TO_TICKS(MPU6050_RETRY_DELAY_MS));
-        }
-    }
-    return mpu6050_map_esp_error(error);
+    return mpu6050_read_registers_timeout(handle, reg, data, len,
+                                          handle->timeout_ms);
 }
 
-static int mpu6050_read_sample(mpu6050_handle_t handle,
-                               mpu6050_sample_t *sample)
+static int mpu6050_read_sample_timeout(mpu6050_handle_t handle,
+                                       mpu6050_sample_t *sample,
+                                       uint32_t timeout_ms)
 {
     uint8_t data[MPU6050_SAMPLE_BURST_LEN];
     int result;
 
-    result = mpu6050_read_registers(handle, MPU6050_REG_ACCEL_XOUT_H,
-                                    data, sizeof(data));
+    result = mpu6050_read_registers_timeout(
+        handle, MPU6050_REG_ACCEL_XOUT_H, data, sizeof(data), timeout_ms);
     if (result != 0) {
         return result;
     }
@@ -186,6 +177,33 @@ static int mpu6050_read_sample(mpu6050_handle_t handle,
     sample->gy_dps = (float)mpu6050_decode_i16(&data[10]) / MPU6050_GYRO_LSB_PER_DPS;
     sample->gz_dps = (float)mpu6050_decode_i16(&data[12]) / MPU6050_GYRO_LSB_PER_DPS;
     return 0;
+}
+
+static int mpu6050_read_sample_with_retry_until(mpu6050_handle_t handle,
+                                                mpu6050_sample_t *sample,
+                                                int64_t deadline_us)
+{
+    int result = ERR_NO_DEVICE;
+
+    /* 只重试完整采样，不在每个寄存器访问层叠加重试。 */
+    for (uint32_t attempt = 0U;
+         attempt < MPU6050_SAMPLE_MAX_ATTEMPTS;
+         ++attempt) {
+        uint32_t timeout_ms = mpu6050_remaining_timeout_ms(deadline_us);
+
+        if (timeout_ms == 0U) {
+            return ERR_TIMEOUT;
+        }
+        if (timeout_ms > handle->timeout_ms) {
+            timeout_ms = handle->timeout_ms;
+        }
+        result = mpu6050_read_sample_timeout(handle, sample, timeout_ms);
+        if (result == 0) {
+            return 0;
+        }
+    }
+
+    return result;
 }
 
 static int mpu6050_configure_device(mpu6050_handle_t handle)
@@ -243,19 +261,45 @@ static int mpu6050_calibrate_gyro(mpu6050_handle_t handle,
     float sum_x = 0.0f;
     float sum_y = 0.0f;
     float sum_z = 0.0f;
+    int64_t deadline_us = esp_timer_get_time() +
+                          (int64_t)MPU6050_CALIBRATION_TIMEOUT_MS * 1000LL;
+    uint16_t required_count = calibration_samples / 2U;
     uint16_t valid_count = 0U;
+    uint16_t consecutive_failures = 0U;
+
+    if (required_count < MPU6050_MIN_CALIBRATION_COUNT) {
+        required_count = MPU6050_MIN_CALIBRATION_COUNT;
+    }
 
     for (uint16_t index = 0U; index < calibration_samples; ++index) {
-        if (mpu6050_read_sample(handle, &sample) == 0) {
+        int result = mpu6050_read_sample_with_retry_until(handle, &sample,
+                                                           deadline_us);
+
+        if (result == 0) {
             sum_x += sample.gx_dps;
             sum_y += sample.gy_dps;
             sum_z += sample.gz_dps;
             valid_count++;
+            consecutive_failures = 0U;
+        } else {
+            consecutive_failures++;
+            if (consecutive_failures >=
+                MPU6050_CALIBRATION_MAX_CONSECUTIVE_FAILURES) {
+                return ERR_MPU6050_CALIBRATION;
+            }
         }
-        vTaskDelay(pdMS_TO_TICKS(MPU6050_SAMPLE_DELAY_MS));
+        if ((uint16_t)(valid_count + calibration_samples - index - 1U) <
+            required_count) {
+            return ERR_MPU6050_CALIBRATION;
+        }
+        if (index + 1U < calibration_samples) {
+            if (mpu6050_remaining_timeout_ms(deadline_us) == 0U) {
+                return ERR_MPU6050_CALIBRATION;
+            }
+            vTaskDelay(pdMS_TO_TICKS(MPU6050_SAMPLE_DELAY_MS));
+        }
     }
-    if (valid_count < MPU6050_MIN_CALIBRATION_COUNT ||
-        valid_count < (uint16_t)(calibration_samples / 2U)) {
+    if (valid_count < required_count) {
         return ERR_MPU6050_CALIBRATION;
     }
 
@@ -295,14 +339,6 @@ int mpu6050_init_device(mpu6050_handle_t *handle, const mpu6050_cfg_t *cfg)
     s_ctx.complementary_alpha = cfg->complementary_alpha;
     s_ctx_in_use = true;
 
-    if (cfg->initialize_i2c || !bsp_i2c_is_initialized()) {
-        error = bsp_i2c_init();
-        if (error != ESP_OK) {
-            result = mpu6050_map_esp_error(error);
-            MPU6050_LOG_ERR("init FAIL, reason=i2c_bus err=%d", result);
-            goto fail;
-        }
-    }
     error = bsp_i2c_add_device_7bit(cfg->i2c_addr, cfg->clk_speed_hz,
                                     &s_ctx.i2c_device);
     if (error != ESP_OK) {
@@ -357,10 +393,12 @@ int mpu6050_read_orientation(mpu6050_handle_t handle,
     mpu6050_sample_t sample;
     float accel_roll_deg;
     float accel_pitch_deg;
-    float accel_norm_g;
+    float accel_norm_squared_g;
+    float yz_norm_g;
     float delta_time_s;
     float gyro_roll_deg;
     float gyro_pitch_deg;
+    bool accel_correction_used;
     int64_t now_us;
     int result;
 
@@ -372,31 +410,37 @@ int mpu6050_read_orientation(mpu6050_handle_t handle,
     }
     memset(orientation, 0, sizeof(*orientation));
 
-    result = mpu6050_read_sample(handle, &sample);
+    now_us = esp_timer_get_time();
+    result = mpu6050_read_sample_with_retry_until(
+        handle, &sample, now_us + (int64_t)handle->timeout_ms * 1000LL);
     if (result != 0) {
-        MPU6050_LOG_ERR("read FAIL, stage=i2c err=%d", result);
         return result;
     }
 
-    accel_norm_g = sqrtf(sample.ax_g * sample.ax_g + sample.ay_g * sample.ay_g +
-                         sample.az_g * sample.az_g);
-    if (!isfinite(accel_norm_g) || accel_norm_g < MPU6050_ACCEL_NORM_MIN_G ||
-        accel_norm_g > MPU6050_ACCEL_NORM_MAX_G) {
-        handle->error_count++;
-        MPU6050_LOG_WRN("data invalid, reason=accel_norm");
-        return ERR_MPU6050_DATA_INVALID;
-    }
-
-    accel_roll_deg = atan2f(sample.ay_g, sample.az_g) * MPU6050_RAD_TO_DEG;
-    accel_pitch_deg = atan2f(-sample.ax_g,
-                            sqrtf(sample.ay_g * sample.ay_g +
-                                  sample.az_g * sample.az_g)) * MPU6050_RAD_TO_DEG;
     now_us = esp_timer_get_time();
     delta_time_s = (float)(now_us - handle->last_update_us) / 1000000.0f;
     handle->last_update_us = now_us;
+    accel_norm_squared_g = sample.ax_g * sample.ax_g +
+                           sample.ay_g * sample.ay_g +
+                           sample.az_g * sample.az_g;
+    accel_correction_used =
+        isfinite(accel_norm_squared_g) &&
+        accel_norm_squared_g >=
+            MPU6050_ACCEL_NORM_MIN_G * MPU6050_ACCEL_NORM_MIN_G &&
+        accel_norm_squared_g <=
+            MPU6050_ACCEL_NORM_MAX_G * MPU6050_ACCEL_NORM_MAX_G;
+    if (accel_correction_used) {
+        yz_norm_g = sqrtf(sample.ay_g * sample.ay_g +
+                          sample.az_g * sample.az_g);
+        accel_roll_deg = atan2f(sample.ay_g, sample.az_g) * MPU6050_RAD_TO_DEG;
+        accel_pitch_deg = atan2f(-sample.ax_g, yz_norm_g) * MPU6050_RAD_TO_DEG;
+    }
 
     if (!handle->filter_seeded || delta_time_s <= 0.0f ||
         delta_time_s > MPU6050_MAX_DELTA_TIME_S) {
+        if (!accel_correction_used) {
+            return ERR_MPU6050_DATA_INVALID;
+        }
         handle->roll_deg = accel_roll_deg;
         handle->pitch_deg = accel_pitch_deg;
         handle->filter_seeded = true;
@@ -405,10 +449,15 @@ int mpu6050_read_orientation(mpu6050_handle_t handle,
                         (sample.gx_dps - handle->gyro_bias_x_dps) * delta_time_s;
         gyro_pitch_deg = handle->pitch_deg +
                          (sample.gy_dps - handle->gyro_bias_y_dps) * delta_time_s;
-        handle->roll_deg = handle->complementary_alpha * gyro_roll_deg +
-                           (1.0f - handle->complementary_alpha) * accel_roll_deg;
-        handle->pitch_deg = handle->complementary_alpha * gyro_pitch_deg +
-                            (1.0f - handle->complementary_alpha) * accel_pitch_deg;
+        if (accel_correction_used) {
+            handle->roll_deg = handle->complementary_alpha * gyro_roll_deg +
+                               (1.0f - handle->complementary_alpha) * accel_roll_deg;
+            handle->pitch_deg = handle->complementary_alpha * gyro_pitch_deg +
+                                (1.0f - handle->complementary_alpha) * accel_pitch_deg;
+        } else {
+            handle->roll_deg = gyro_roll_deg;
+            handle->pitch_deg = gyro_pitch_deg;
+        }
         handle->yaw_deg = mpu6050_wrap_angle(
             handle->yaw_deg +
             (sample.gz_dps - handle->gyro_bias_z_dps) * delta_time_s);
@@ -419,6 +468,7 @@ int mpu6050_read_orientation(mpu6050_handle_t handle,
     orientation->pitch_deg = mpu6050_wrap_angle(handle->pitch_deg);
     orientation->yaw_deg = handle->yaw_deg;
     orientation->valid = true;
+    orientation->accel_correction_used = accel_correction_used;
     orientation->sample_count = handle->sample_count;
     return 0;
 }

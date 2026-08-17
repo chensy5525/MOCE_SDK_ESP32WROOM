@@ -6,10 +6,12 @@ MPU-6050 minimum example through the CH32 dynamic CAN-to-I2C gateway.
 - Downstream I2C: address `0x68`, speed `400 kHz`
 - CAN bitrate: `500 kbit/s`
 - Discovery: F0/F1/F2 dynamic assignment and F2-confirmed stable node table
-- Rediscovery: incremental merge by `device_type + token`
-- Startup: keep the module stationary during 200-sample gyro calibration
+- Rediscovery: every 10 seconds only while no MPU6050 has been bound
+- Startup: keep the module stationary during the bounded 50-sample gyro calibration
 - Calculation/output: `100 Hz` calculation, UART0 angles at `5 Hz`
-- Duration: 100 lines per discovered MPU-6050 (about 20 seconds)
+- Instance policy: try confirmed candidates in order and retain the first MPU6050 whose live probe and initialization succeed
+- Duration: calculate at 100 Hz and print at 5 Hz for 60 seconds after the
+  first module binds successfully, then deinitialize and return
 - Limitation: yaw is relative and drifts because there is no magnetometer
 
 The driver only calls `ch32_i2c_multi_gateway_final`. Its coherent 14-byte read

@@ -15,7 +15,9 @@ static const char *TAG = "ch32_i2c_multi";
 #define DYN_CMD_ID_ACK         0xF2U
 #define DYN_MAGIC_AA           0xAAU
 #define DYN_MAGIC_55           0x55U
-#define NODE_PROTOCOL_VERSION  0x01U
+#define NODE_PROTOCOL_VERSION_V1 0x01U
+#define NODE_PROTOCOL_VERSION_V2 0x02U
+#define NODE_V2_MIN_FW_VERSION   4U
 
 #define CAN_ID_DISCOVERY       0x000U
 #define CAN_ID_STATUS_BASE     0x100U
@@ -51,15 +53,25 @@ static const char *TAG = "ch32_i2c_multi";
 #define I2C_MULTI_FLAG_END     0x02U
 #define I2C_MULTI_CHUNK_MAX    4U
 #define I2C_MULTI_BUFFER_MAX   136U
-#define DISCOVERY_QUERY_INTERVAL_MS 500U
-#define DISCOVERY_SETTLE_MS         100U
+#define I2C_MULTI_PER_CHUNK_ACK_MIN_FW 5U
+#define I2C_MULTI_LEGACY_PACING_MS     2U
+#define DISCOVERY_QUERY_INTERVAL_MS 100U
+#define DISCOVERY_QUIET_MS          120U
+#define DISCOVERY_MIN_ROUNDS        3U
 
 static bool s_initialized;
 static ch32_i2c_multi_config_t s_cfg;
+static uint8_t s_request_ids[I2C_NODE_ID_MAX - I2C_NODE_ID_MIN + 1U];
 
 static uint32_t ch32_i2c_multi_now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000LL);
+}
+
+static uint32_t ch32_i2c_multi_remaining_ms(uint32_t deadline)
+{
+    uint32_t now = ch32_i2c_multi_now_ms();
+    return (int32_t)(deadline - now) > 0 ? deadline - now : 0U;
 }
 
 void ch32_i2c_multi_default_config(ch32_i2c_multi_config_t *cfg)
@@ -70,16 +82,23 @@ void ch32_i2c_multi_default_config(ch32_i2c_multi_config_t *cfg)
     memset(cfg, 0, sizeof(*cfg));
     cfg->discovery_timeout_ms = 5000U;
     cfg->command_timeout_ms = 350U;
+    cfg->discovery_query_interval_ms = DISCOVERY_QUERY_INTERVAL_MS;
+    cfg->discovery_quiet_ms = DISCOVERY_QUIET_MS;
+    cfg->discovery_min_rounds = DISCOVERY_MIN_ROUNDS;
 }
 
 
 int ch32_i2c_multi_init(const ch32_i2c_multi_config_t *cfg)
 {
-    if (cfg == NULL || cfg->command_timeout_ms == 0U) {
+    if (cfg == NULL || cfg->command_timeout_ms == 0U ||
+        cfg->discovery_timeout_ms == 0U ||
+        cfg->discovery_query_interval_ms == 0U ||
+        cfg->discovery_quiet_ms == 0U ||
+        cfg->discovery_min_rounds == 0U) {
         return -1;
     }
     if (s_initialized) {
-        return 0;
+        return memcmp(&s_cfg, cfg, sizeof(s_cfg)) == 0 ? 0 : -1;
     }
     if (ch32_can_gateway_core_init() != 0) {
         ESP_LOGE(TAG, "shared CAN core init failed");
@@ -102,9 +121,22 @@ static ch32_i2c_multi_result_t ch32_i2c_multi_map_core_result(
     case CH32_CAN_GATEWAY_INVALID_ARG:
         return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     case CH32_CAN_GATEWAY_BUSY: return CH32_I2C_MULTI_RESULT_BUSY;
+    case CH32_CAN_GATEWAY_OVERFLOW:
+        return CH32_I2C_MULTI_RESULT_OVERFLOW;
     case CH32_CAN_GATEWAY_COMM_FAIL:
     default: return CH32_I2C_MULTI_RESULT_COMM_FAIL;
     }
+}
+
+static ch32_i2c_multi_result_t ch32_i2c_multi_send_until(
+    uint32_t id, const uint8_t *data, uint8_t dlc, uint32_t deadline)
+{
+    uint32_t remaining = ch32_i2c_multi_remaining_ms(deadline);
+    if (remaining == 0U) {
+        return CH32_I2C_MULTI_RESULT_TIMEOUT;
+    }
+    return ch32_i2c_multi_map_core_result(
+        ch32_can_gateway_core_send_timeout(id, data, dlc, remaining));
 }
 
 ch32_i2c_multi_result_t ch32_can_gateway_send_frame(
@@ -119,6 +151,7 @@ void ch32_can_gateway_set_observer_filter(uint32_t filter_id)
     (void)filter_id;
 }
 
+#if CH32_CAN_GATEWAY_LEGACY_COMPAT
 ch32_i2c_multi_result_t ch32_can_gateway_poll_control_frame(
     uint8_t device_type, ch32_i2c_multi_can_frame_t *frame,
     uint32_t timeout_ms)
@@ -127,6 +160,7 @@ ch32_i2c_multi_result_t ch32_can_gateway_poll_control_frame(
         ch32_can_gateway_core_poll_control(
             device_type, (ch32_can_gateway_frame_t *)frame, timeout_ms));
 }
+#endif
 
 ch32_i2c_multi_result_t ch32_can_gateway_poll_observed_frame(
     ch32_i2c_multi_can_frame_t *frame, uint32_t timeout_ms)
@@ -202,7 +236,7 @@ static ch32_i2c_multi_result_t ch32_i2c_multi_send_assignment(
     uint8_t assignment[8] = {
         DYN_CMD_ASSIGN_ID, node_id, DYN_MAGIC_AA, DYN_MAGIC_55,
         (uint8_t)node->token, (uint8_t)(node->token >> 8U),
-        I2C_DEVICE_TYPE, NODE_PROTOCOL_VERSION
+        I2C_DEVICE_TYPE, node->protocol_version
     };
 
     node->node_id = node_id;
@@ -211,6 +245,7 @@ static ch32_i2c_multi_result_t ch32_i2c_multi_send_assignment(
                                        sizeof(assignment));
 }
 
+#if CH32_CAN_GATEWAY_LEGACY_COMPAT
 ch32_i2c_multi_result_t ch32_i2c_multi_discover_and_assign(
     ch32_i2c_multi_node_t *nodes, uint8_t max_nodes, size_t *count,
     uint32_t timeout_ms)
@@ -218,6 +253,7 @@ ch32_i2c_multi_result_t ch32_i2c_multi_discover_and_assign(
     return ch32_i2c_multi_discover_incremental(nodes, max_nodes, count,
                                                timeout_ms);
 }
+#endif
 
 ch32_i2c_multi_result_t ch32_i2c_multi_discover_incremental(
     ch32_i2c_multi_node_t *nodes, uint8_t max_nodes, size_t *count,
@@ -225,13 +261,15 @@ ch32_i2c_multi_result_t ch32_i2c_multi_discover_incremental(
 {
     static uint8_t query_sequence;
     uint8_t query[8] = {
-        DYN_CMD_REQUEST_ID, I2C_DEVICE_TYPE, NODE_PROTOCOL_VERSION, 0U,
+        DYN_CMD_REQUEST_ID, I2C_DEVICE_TYPE, NODE_PROTOCOL_VERSION_V2, 0U,
         0U, 0U, 0U, 0U
     };
     uint32_t deadline;
     uint32_t next_query_ms;
     bool confirmed = false;
     bool transmit_failed = false;
+    uint8_t queries_sent = 1U;
+    uint32_t last_activity_ms;
 
     if (!s_initialized || nodes == NULL || count == NULL ||
         max_nodes == 0U || *count > max_nodes) {
@@ -246,16 +284,33 @@ ch32_i2c_multi_result_t ch32_i2c_multi_discover_incremental(
     }
 
     deadline = ch32_i2c_multi_now_ms() + timeout_ms;
-    next_query_ms = ch32_i2c_multi_now_ms() + DISCOVERY_QUERY_INTERVAL_MS;
+    last_activity_ms = ch32_i2c_multi_now_ms();
+    next_query_ms = last_activity_ms + s_cfg.discovery_query_interval_ms;
     while ((int32_t)(deadline - ch32_i2c_multi_now_ms()) > 0) {
         ch32_i2c_multi_can_frame_t frame;
         ch32_i2c_multi_node_t *node;
         uint16_t token;
         uint32_t now_ms = ch32_i2c_multi_now_ms();
+        bool assignment_pending = false;
+
+        for (size_t index = 0U; index < *count; ++index) {
+            if (nodes[index].token != 0U && !nodes[index].ready) {
+                assignment_pending = true;
+                break;
+            }
+        }
+        if (confirmed && !assignment_pending &&
+            queries_sent >= s_cfg.discovery_min_rounds &&
+            (uint32_t)(now_ms - last_activity_ms) >=
+                s_cfg.discovery_quiet_ms) {
+            break;
+        }
 
         /* 不同查询序号会改变 CH32 的 token 退避槽。即使两个节点本轮
          * 的 0x000 回包碰撞，下一轮也能获得新的发送时机。 */
-        if ((int32_t)(now_ms - next_query_ms) >= 0) {
+        if ((int32_t)(now_ms - next_query_ms) >= 0 &&
+            (assignment_pending || !confirmed ||
+             queries_sent < s_cfg.discovery_min_rounds)) {
             query[4] = ++query_sequence;
             if (ch32_can_gateway_send_frame(CAN_ID_DISCOVERY, query,
                                             sizeof(query)) !=
@@ -263,7 +318,8 @@ ch32_i2c_multi_result_t ch32_i2c_multi_discover_incremental(
                 transmit_failed = true;
                 ESP_LOGW(TAG, "F0 retry deferred seq=%u", query[4]);
             }
-            next_query_ms = now_ms + DISCOVERY_QUERY_INTERVAL_MS;
+            queries_sent++;
+            next_query_ms = now_ms + s_cfg.discovery_query_interval_ms;
         }
 
         if (ch32_can_gateway_poll_observed_frame(&frame, 50U) !=
@@ -333,9 +389,16 @@ ch32_i2c_multi_result_t ch32_i2c_multi_discover_incremental(
                 bool first_confirmation = !node->ready;
                 node->node_id = acknowledged_id;
                 node->fw_version = frame.data[7];
+                if (node->protocol_version == 0U) {
+                    node->protocol_version =
+                        node->fw_version >= NODE_V2_MIN_FW_VERSION
+                            ? NODE_PROTOCOL_VERSION_V2
+                            : NODE_PROTOCOL_VERSION_V1;
+                }
                 node->ready = true;
                 confirmed = true;
                 if (first_confirmation) {
+                    last_activity_ms = ch32_i2c_multi_now_ms();
                     ESP_LOGI(TAG,
                              "F2 confirmed type=0x%02X token=0x%04X node=%u fw=%u",
                              I2C_DEVICE_TYPE, token, acknowledged_id,
@@ -364,18 +427,34 @@ ch32_i2c_multi_result_t ch32_i2c_multi_discover_incremental(
             memset(node, 0, sizeof(*node));
             node->token = token;
             node->device_type = I2C_DEVICE_TYPE;
+            node->protocol_version =
+                frame.data[2] >= NODE_V2_MIN_FW_VERSION
+                    ? NODE_PROTOCOL_VERSION_V2 : NODE_PROTOCOL_VERSION_V1;
+            last_activity_ms = ch32_i2c_multi_now_ms();
             ESP_LOGI(TAG,
                      "F0 discovered type=0x%02X token=0x%04X fw=%u caps=0x%02X",
                      I2C_DEVICE_TYPE, token, frame.data[2], frame.data[3]);
         }
         node->fw_version = frame.data[2];
         node->capability_flags = frame.data[3];
-        if (node->ready) {
-            continue;
-        }
         {
-            uint8_t assigned_id = ch32_i2c_multi_allocate_id(
-                nodes, *count, node);
+            uint8_t assigned_id = node->node_id;
+            if (node->ready) {
+                ch32_can_gateway_core_session_invalidate(
+                    I2C_DEVICE_TYPE, node->node_id);
+                node->ready = false;
+                node->speed_valid = false;
+                last_activity_ms = ch32_i2c_multi_now_ms();
+                ESP_LOGW(TAG,
+                         "F0 restart detected token=0x%04X old_node=%u",
+                         token, assigned_id);
+            }
+            if (assigned_id < I2C_NODE_ID_MIN ||
+                assigned_id > I2C_NODE_ID_MAX ||
+                ch32_i2c_multi_id_used(nodes, *count, assigned_id, node)) {
+                assigned_id = ch32_i2c_multi_allocate_id(
+                    nodes, *count, node);
+            }
             if (assigned_id != 0U &&
                 ch32_i2c_multi_send_assignment(node, assigned_id) !=
                     CH32_I2C_MULTI_RESULT_OK) {
@@ -383,13 +462,14 @@ ch32_i2c_multi_result_t ch32_i2c_multi_discover_incremental(
                 continue;
             }
             if (assigned_id != 0U) {
+                last_activity_ms = ch32_i2c_multi_now_ms();
                 ESP_LOGI(TAG,
                          "F1 sent type=0x%02X token=0x%04X node=%u",
                          I2C_DEVICE_TYPE, token, assigned_id);
             }
         }
     }
-    ch32_i2c_multi_drain_observer_queue(DISCOVERY_SETTLE_MS);
+    ch32_i2c_multi_drain_observer_queue(0U);
     if (confirmed) {
         return CH32_I2C_MULTI_RESULT_OK;
     }
@@ -404,21 +484,46 @@ static bool ch32_i2c_multi_node_valid(const ch32_i2c_multi_node_t *node)
            node->node_id <= I2C_NODE_ID_MAX;
 }
 
-static void ch32_i2c_multi_drain_control_queue(void)
+static ch32_i2c_multi_result_t ch32_i2c_multi_session_acquire(
+    const ch32_i2c_multi_node_t *node, uint32_t deadline)
 {
-    ch32_i2c_multi_can_frame_t discarded;
-    while (ch32_can_gateway_poll_control_frame(
-               I2C_DEVICE_TYPE, &discarded, 0U) ==
-           CH32_I2C_MULTI_RESULT_OK) {
+    uint32_t remaining = ch32_i2c_multi_remaining_ms(deadline);
+    if (remaining == 0U) {
+        return CH32_I2C_MULTI_RESULT_TIMEOUT;
     }
+    return ch32_i2c_multi_map_core_result(
+        ch32_can_gateway_core_session_acquire(
+            I2C_DEVICE_TYPE, node->node_id, remaining));
+}
+
+static ch32_i2c_multi_result_t ch32_i2c_multi_session_poll(
+    const ch32_i2c_multi_node_t *node, ch32_i2c_multi_can_frame_t *frame,
+    uint32_t deadline)
+{
+    uint32_t remaining = ch32_i2c_multi_remaining_ms(deadline);
+    uint32_t wait_ms;
+
+    if (remaining == 0U) {
+        return CH32_I2C_MULTI_RESULT_TIMEOUT;
+    }
+    wait_ms = remaining < 20U ? remaining : 20U;
+    return ch32_i2c_multi_map_core_result(
+        ch32_can_gateway_core_session_poll(
+            I2C_DEVICE_TYPE, node->node_id,
+            (ch32_can_gateway_frame_t *)frame, wait_ms));
+}
+
+static void ch32_i2c_multi_session_release(
+    const ch32_i2c_multi_node_t *node)
+{
+    ch32_can_gateway_core_session_release(I2C_DEVICE_TYPE, node->node_id);
 }
 
 static ch32_i2c_multi_result_t ch32_i2c_multi_wait_command(
     const ch32_i2c_multi_node_t *node, uint8_t command_type,
     uint8_t status_type, uint8_t expected_addr, uint8_t expected_detail,
-    ch32_i2c_multi_can_frame_t *status_frame)
+    ch32_i2c_multi_can_frame_t *status_frame, uint32_t deadline)
 {
-    uint32_t deadline = ch32_i2c_multi_now_ms() + s_cfg.command_timeout_ms;
     bool status_received = false;
     bool status_success = false;
     bool ack_received = false;
@@ -426,9 +531,12 @@ static ch32_i2c_multi_result_t ch32_i2c_multi_wait_command(
 
     while ((int32_t)(deadline - ch32_i2c_multi_now_ms()) > 0) {
         ch32_i2c_multi_can_frame_t frame;
-        if (ch32_can_gateway_poll_control_frame(
-                I2C_DEVICE_TYPE, &frame, 20U) !=
-            CH32_I2C_MULTI_RESULT_OK) {
+        ch32_i2c_multi_result_t poll_result =
+            ch32_i2c_multi_session_poll(node, &frame, deadline);
+        if (poll_result != CH32_I2C_MULTI_RESULT_OK) {
+            if (poll_result == CH32_I2C_MULTI_RESULT_OVERFLOW) {
+                return poll_result;
+            }
             continue;
         }
         if (frame.id == CAN_ID_STATUS_BASE + node->node_id &&
@@ -468,41 +576,56 @@ static ch32_i2c_multi_result_t ch32_i2c_multi_wait_command(
             ack_success = frame.data[1] != 0U;
         }
         if (status_received && ack_received) {
-            return status_success && ack_success
-                       ? CH32_I2C_MULTI_RESULT_OK
-                       : CH32_I2C_MULTI_RESULT_COMM_FAIL;
+            if (!ack_success) {
+                return CH32_I2C_MULTI_RESULT_COMM_FAIL;
+            }
+            /* A completed probe is a valid transaction even when the
+             * downstream address did not ACK.  The found/not-found result is
+             * carried in the status payload and must not be collapsed into a
+             * transport failure. */
+            if (status_type == I2C_STATUS_PROBE) {
+                return CH32_I2C_MULTI_RESULT_OK;
+            }
+            return status_success ? CH32_I2C_MULTI_RESULT_OK
+                                  : CH32_I2C_MULTI_RESULT_COMM_FAIL;
         }
     }
     return CH32_I2C_MULTI_RESULT_TIMEOUT;
 }
 
-static ch32_i2c_multi_result_t ch32_i2c_multi_run_command(
+static ch32_i2c_multi_result_t ch32_i2c_multi_run_command_timeout(
     const ch32_i2c_multi_node_t *node, const uint8_t command[8],
     uint8_t status_type, uint8_t expected_addr, uint8_t expected_detail,
-    ch32_i2c_multi_can_frame_t *status_frame)
+    ch32_i2c_multi_can_frame_t *status_frame, uint32_t timeout_ms)
 {
     ch32_i2c_multi_result_t result;
+    uint32_t deadline;
 
     if (!ch32_i2c_multi_node_valid(node)) {
         return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     }
-    if (ch32_can_gateway_core_lock(s_cfg.command_timeout_ms) !=
-        CH32_CAN_GATEWAY_OK) {
-        return CH32_I2C_MULTI_RESULT_BUSY;
+    if (timeout_ms == 0U) {
+        return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     }
-    ch32_i2c_multi_drain_control_queue();
-    result = ch32_can_gateway_send_frame(CAN_ID_CMD_BASE + node->node_id,
-                                         command, 8U);
+    deadline = ch32_i2c_multi_now_ms() + timeout_ms;
+    result = ch32_i2c_multi_session_acquire(node, deadline);
+    if (result != CH32_I2C_MULTI_RESULT_OK) {
+        return result;
+    }
+    ch32_can_gateway_core_session_drain(I2C_DEVICE_TYPE, node->node_id);
+    result = ch32_i2c_multi_send_until(CAN_ID_CMD_BASE + node->node_id,
+                                       command, 8U, deadline);
     if (result == CH32_I2C_MULTI_RESULT_OK) {
         result = ch32_i2c_multi_wait_command(
             node, command[0], status_type, expected_addr, expected_detail,
-            status_frame);
+            status_frame, deadline);
     }
-    ch32_can_gateway_core_unlock();
+    ch32_i2c_multi_session_release(node);
     return result;
 }
 
-ch32_i2c_multi_result_t ch32_i2c_multi_scan(ch32_i2c_multi_node_t *node)
+ch32_i2c_multi_result_t ch32_i2c_multi_scan(
+    const ch32_i2c_multi_node_t *node, ch32_i2c_multi_scan_result_t *scan_result)
 {
     const uint8_t command[8] = {I2C_CMD_SCAN, 0U, 0U, 0U,
                                 0U, 0U, 0U, 0U};
@@ -510,25 +633,50 @@ ch32_i2c_multi_result_t ch32_i2c_multi_scan(ch32_i2c_multi_node_t *node)
     ch32_i2c_multi_result_t result;
     uint8_t reported;
 
-    if (node == NULL) {
+    if (node == NULL || scan_result == NULL) {
         return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     }
-    result = ch32_i2c_multi_run_command(node, command, I2C_STATUS_SCAN,
-                                        0U, 0U, &status);
+    memset(scan_result, 0, sizeof(*scan_result));
+    result = ch32_i2c_multi_run_command_timeout(
+        node, command, I2C_STATUS_SCAN, 0U, 0U, &status,
+        s_cfg.command_timeout_ms);
     if (result != CH32_I2C_MULTI_RESULT_OK) {
         return result;
     }
-    node->i2c_addr_count = 0U;
     reported = status.data[1] > 6U ? 6U : status.data[1];
     for (uint8_t index = 0U; index < reported &&
-         node->i2c_addr_count < CH32_I2C_MULTI_MAX_ADDRS_PER_NODE; ++index) {
-        node->i2c_addrs[node->i2c_addr_count++] = status.data[2U + index];
+         scan_result->i2c_addr_count < CH32_I2C_MULTI_MAX_ADDRS_PER_NODE;
+         ++index) {
+        scan_result->i2c_addrs[scan_result->i2c_addr_count++] =
+            status.data[2U + index];
+    }
+    if (status.data[1] == 0U && status.data[2] == 0xD1U) {
+        scan_result->bus_diag_valid = true;
+        scan_result->scl_before_high = status.data[3] != 0U;
+        scan_result->sda_before_high = status.data[4] != 0U;
+        scan_result->recovery_ok = status.data[5] != 0U;
+        scan_result->scl_after_high = (status.data[6] & 0x01U) != 0U;
+        scan_result->sda_after_high = (status.data[6] & 0x02U) != 0U;
+        scan_result->gpio_ack_normal = (status.data[6] & 0x04U) != 0U;
+        scan_result->gpio_ack_swapped = (status.data[6] & 0x08U) != 0U;
+        ESP_LOGI(TAG,
+                 "GPIO probe token=0x%04X node=%u addr=0x29 normal=%u swapped=%u",
+                 node->token, node->node_id, scan_result->gpio_ack_normal,
+                 scan_result->gpio_ack_swapped);
     }
     return CH32_I2C_MULTI_RESULT_OK;
 }
 
 ch32_i2c_multi_result_t ch32_i2c_multi_probe(
     const ch32_i2c_multi_node_t *node, uint8_t addr, bool *found)
+{
+    return ch32_i2c_multi_probe_timeout(node, addr, found,
+                                        s_cfg.command_timeout_ms);
+}
+
+ch32_i2c_multi_result_t ch32_i2c_multi_probe_timeout(
+    const ch32_i2c_multi_node_t *node, uint8_t addr, bool *found,
+    uint32_t timeout_ms)
 {
     uint8_t command[8] = {I2C_CMD_PROBE, addr, 0U, 0U,
                           0U, 0U, 0U, 0U};
@@ -539,13 +687,10 @@ ch32_i2c_multi_result_t ch32_i2c_multi_probe(
         return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     }
     *found = false;
-    result = ch32_i2c_multi_run_command(node, command, I2C_STATUS_PROBE,
-                                        addr, 0U, &status);
+    result = ch32_i2c_multi_run_command_timeout(
+        node, command, I2C_STATUS_PROBE, addr, 0U, &status, timeout_ms);
     if (result == CH32_I2C_MULTI_RESULT_OK) {
         *found = status.data[2] != 0U;
-    } else if (result == CH32_I2C_MULTI_RESULT_COMM_FAIL) {
-        /* 地址探测未命中属于有效事务，不代表 CAN 桥接链路故障。 */
-        result = CH32_I2C_MULTI_RESULT_OK;
     }
     return result;
 }
@@ -553,6 +698,14 @@ ch32_i2c_multi_result_t ch32_i2c_multi_probe(
 ch32_i2c_multi_result_t ch32_i2c_multi_write_reg_to(
     const ch32_i2c_multi_node_t *node, uint8_t addr, uint8_t reg,
     const uint8_t *data, uint8_t len)
+{
+    return ch32_i2c_multi_write_reg_to_timeout(
+        node, addr, reg, data, len, s_cfg.command_timeout_ms);
+}
+
+ch32_i2c_multi_result_t ch32_i2c_multi_write_reg_to_timeout(
+    const ch32_i2c_multi_node_t *node, uint8_t addr, uint8_t reg,
+    const uint8_t *data, uint8_t len, uint32_t timeout_ms)
 {
     uint8_t command[8] = {I2C_CMD_WRITE_REG, addr, reg, len,
                           0U, 0U, 0U, 0U};
@@ -563,8 +716,8 @@ ch32_i2c_multi_result_t ch32_i2c_multi_write_reg_to(
     if (len > 0U) {
         memcpy(&command[4], data, len);
     }
-    return ch32_i2c_multi_run_command(node, command, I2C_STATUS_WRITE,
-                                      addr, 0U, NULL);
+    return ch32_i2c_multi_run_command_timeout(
+        node, command, I2C_STATUS_WRITE, addr, 0U, NULL, timeout_ms);
 }
 
 ch32_i2c_multi_result_t ch32_i2c_multi_write_to(
@@ -578,26 +731,43 @@ ch32_i2c_multi_result_t ch32_i2c_multi_write_to(
         return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     }
     memcpy(&command[3], data, len);
-    return ch32_i2c_multi_run_command(node, command, I2C_STATUS_RAW_WRITE,
-                                      addr, 0U, NULL);
+    return ch32_i2c_multi_run_command_timeout(
+        node, command, I2C_STATUS_RAW_WRITE, addr, 0U, NULL,
+        s_cfg.command_timeout_ms);
 }
 
 ch32_i2c_multi_result_t ch32_i2c_multi_write_multi_to(
     const ch32_i2c_multi_node_t *node, uint8_t addr,
     const uint8_t *data, uint8_t len)
 {
+    return ch32_i2c_multi_write_multi_to_timeout(
+        node, addr, data, len, s_cfg.command_timeout_ms);
+}
+
+ch32_i2c_multi_result_t ch32_i2c_multi_write_multi_to_timeout(
+    const ch32_i2c_multi_node_t *node, uint8_t addr,
+    const uint8_t *data, uint8_t len, uint32_t timeout_ms)
+{
     ch32_i2c_multi_result_t result = CH32_I2C_MULTI_RESULT_OK;
     uint8_t offset = 0U;
+    uint32_t deadline;
+    bool wait_each_chunk;
 
     if (!ch32_i2c_multi_node_valid(node) || addr > 0x7FU || data == NULL ||
-        len == 0U || len > I2C_MULTI_BUFFER_MAX) {
+        len == 0U || len > I2C_MULTI_BUFFER_MAX || timeout_ms == 0U) {
         return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     }
-    if (ch32_can_gateway_core_lock(s_cfg.command_timeout_ms) !=
-        CH32_CAN_GATEWAY_OK) {
-        return CH32_I2C_MULTI_RESULT_BUSY;
+    deadline = ch32_i2c_multi_now_ms() + timeout_ms;
+    result = ch32_i2c_multi_session_acquire(node, deadline);
+    if (result != CH32_I2C_MULTI_RESULT_OK) {
+        return result;
     }
-    ch32_i2c_multi_drain_control_queue();
+    ch32_can_gateway_core_session_drain(I2C_DEVICE_TYPE, node->node_id);
+    /* FW v5 adds receiver-side flow control for protocol v2.  Older v2
+     * firmware only acknowledges the final fragment, so retain compatibility
+     * with a short pacing delay while avoiding an RX-FIFO burst. */
+    wait_each_chunk = node->protocol_version < NODE_PROTOCOL_VERSION_V2 ||
+                      node->fw_version >= I2C_MULTI_PER_CHUNK_ACK_MIN_FW;
     while (offset < len) {
         uint8_t chunk = (uint8_t)(len - offset);
         uint8_t flags = 0U;
@@ -615,22 +785,26 @@ ch32_i2c_multi_result_t ch32_i2c_multi_write_multi_to(
         command[2] = flags;
         command[3] = chunk;
         memcpy(&command[4], &data[offset], chunk);
-        result = ch32_can_gateway_send_frame(CAN_ID_CMD_BASE + node->node_id,
-                                             command, 8U);
-        if (result == CH32_I2C_MULTI_RESULT_OK) {
+        result = ch32_i2c_multi_send_until(
+            CAN_ID_CMD_BASE + node->node_id, command, 8U, deadline);
+        if (result == CH32_I2C_MULTI_RESULT_OK &&
+            (wait_each_chunk || (flags & I2C_MULTI_FLAG_END) != 0U)) {
             result = ch32_i2c_multi_wait_command(
                 node, I2C_CMD_WRITE_MULTI, I2C_STATUS_WRITE_MULTI,
-                addr, flags, NULL);
+                addr, flags, NULL, deadline);
+        } else if (result == CH32_I2C_MULTI_RESULT_OK) {
+            vTaskDelay(pdMS_TO_TICKS(I2C_MULTI_LEGACY_PACING_MS));
         }
         if (result != CH32_I2C_MULTI_RESULT_OK) {
             break;
         }
         offset = (uint8_t)(offset + chunk);
     }
-    ch32_can_gateway_core_unlock();
+    ch32_i2c_multi_session_release(node);
     return result;
 }
 
+#if CH32_CAN_GATEWAY_LEGACY_COMPAT
 static uint8_t ch32_i2c_multi_primary_addr(const ch32_i2c_multi_node_t *node)
 {
     return node != NULL && node->i2c_addr_count > 0U
@@ -658,15 +832,23 @@ ch32_i2c_multi_result_t ch32_i2c_multi_write_reg(
     return ch32_i2c_multi_write_reg_to(
         node, ch32_i2c_multi_primary_addr(node), reg, data, len);
 }
+#endif
 
 ch32_i2c_multi_result_t ch32_i2c_multi_read_regs_from(
     const ch32_i2c_multi_node_t *node, uint8_t addr, uint8_t reg,
     uint8_t *data, uint8_t len)
 {
-    static uint8_t request_sequence;
-    uint8_t request_id = ++request_sequence;
+    return ch32_i2c_multi_read_regs_from_timeout(
+        node, addr, reg, data, len, s_cfg.command_timeout_ms);
+}
+
+ch32_i2c_multi_result_t ch32_i2c_multi_read_regs_from_timeout(
+    const ch32_i2c_multi_node_t *node, uint8_t addr, uint8_t reg,
+    uint8_t *data, uint8_t len, uint32_t timeout_ms)
+{
+    uint8_t request_id;
     uint8_t command[8] = {I2C_CMD_READ_REGS, addr, reg, len,
-                          request_id, 0U, 0U, 0U};
+                          0U, 0U, 0U, 0U};
     uint32_t deadline;
     uint8_t received = 0U;
     bool done_received = false;
@@ -675,32 +857,36 @@ ch32_i2c_multi_result_t ch32_i2c_multi_read_regs_from(
     bool ack_success = false;
     ch32_i2c_multi_result_t result;
 
-    if (request_id == 0U) {
-        request_id = ++request_sequence;
-        command[4] = request_id;
-    }
     if (!ch32_i2c_multi_node_valid(node) || addr > 0x7FU || data == NULL ||
-        len == 0U || len > 32U) {
+        len == 0U || len > 32U || timeout_ms == 0U) {
         return CH32_I2C_MULTI_RESULT_INVALID_ARG;
     }
-    if (ch32_can_gateway_core_lock(s_cfg.command_timeout_ms) !=
-        CH32_CAN_GATEWAY_OK) {
-        return CH32_I2C_MULTI_RESULT_BUSY;
-    }
-    ch32_i2c_multi_drain_control_queue();
-    result = ch32_can_gateway_send_frame(CAN_ID_CMD_BASE + node->node_id,
-                                         command, 8U);
+    deadline = ch32_i2c_multi_now_ms() + timeout_ms;
+    result = ch32_i2c_multi_session_acquire(node, deadline);
     if (result != CH32_I2C_MULTI_RESULT_OK) {
-        ch32_can_gateway_core_unlock();
         return result;
     }
+    request_id = ++s_request_ids[node->node_id - I2C_NODE_ID_MIN];
+    if (request_id == 0U) {
+        request_id = ++s_request_ids[node->node_id - I2C_NODE_ID_MIN];
+    }
+    command[4] = request_id;
+    ch32_can_gateway_core_session_drain(I2C_DEVICE_TYPE, node->node_id);
+    result = ch32_i2c_multi_send_until(CAN_ID_CMD_BASE + node->node_id,
+                                       command, 8U, deadline);
+    if (result != CH32_I2C_MULTI_RESULT_OK) {
+        goto read_done;
+    }
 
-    deadline = ch32_i2c_multi_now_ms() + s_cfg.command_timeout_ms;
     while ((int32_t)(deadline - ch32_i2c_multi_now_ms()) > 0) {
         ch32_i2c_multi_can_frame_t frame;
-        if (ch32_can_gateway_poll_control_frame(
-                I2C_DEVICE_TYPE, &frame, 20U) !=
-            CH32_I2C_MULTI_RESULT_OK) {
+        ch32_i2c_multi_result_t poll_result =
+            ch32_i2c_multi_session_poll(node, &frame, deadline);
+        if (poll_result != CH32_I2C_MULTI_RESULT_OK) {
+            if (poll_result == CH32_I2C_MULTI_RESULT_OVERFLOW) {
+                result = poll_result;
+                goto read_done;
+            }
             continue;
         }
         if (frame.id == CAN_ID_STATUS_BASE + node->node_id &&
@@ -728,14 +914,17 @@ ch32_i2c_multi_result_t ch32_i2c_multi_read_regs_from(
             result = done_success && ack_success && received == len
                          ? CH32_I2C_MULTI_RESULT_OK
                          : CH32_I2C_MULTI_RESULT_COMM_FAIL;
-            ch32_can_gateway_core_unlock();
-            return result;
+            goto read_done;
         }
     }
-    ch32_can_gateway_core_unlock();
-    return CH32_I2C_MULTI_RESULT_TIMEOUT;
+    result = CH32_I2C_MULTI_RESULT_TIMEOUT;
+
+read_done:
+    ch32_i2c_multi_session_release(node);
+    return result;
 }
 
+#if CH32_CAN_GATEWAY_LEGACY_COMPAT
 ch32_i2c_multi_result_t ch32_i2c_multi_read_regs(
     const ch32_i2c_multi_node_t *node, uint8_t reg, uint8_t *data, uint8_t len)
 {
@@ -772,14 +961,110 @@ ch32_i2c_multi_result_t ch32_i2c_multi_write_read_reg(
     return ch32_i2c_multi_read_regs_from(
         node, ch32_i2c_multi_primary_addr(node), reg, rdata, rlen);
 }
+#endif
+
+ch32_i2c_multi_result_t ch32_i2c_multi_write_read_to_timeout(
+    const ch32_i2c_multi_node_t *node, uint8_t addr,
+    const uint8_t *write_data, uint8_t write_len,
+    uint8_t *read_data, uint8_t read_len, uint32_t timeout_ms)
+{
+    uint8_t request_id;
+    uint8_t command[8] = {I2C_CMD_WRITE_READ, addr, write_len, read_len,
+                           0U, 0U, 0U, 0U};
+    uint32_t deadline;
+    uint8_t received = 0U;
+    bool done_received = false, done_success = false;
+    bool ack_received = false, ack_success = false;
+    ch32_i2c_multi_result_t result;
+
+    if (!ch32_i2c_multi_node_valid(node) || addr > 0x7FU ||
+        write_data == NULL || write_len == 0U || write_len > 3U ||
+        read_data == NULL || read_len == 0U || read_len > 32U ||
+        timeout_ms == 0U) {
+        return CH32_I2C_MULTI_RESULT_INVALID_ARG;
+    }
+    memcpy(&command[5], write_data, write_len);
+    deadline = ch32_i2c_multi_now_ms() + timeout_ms;
+    result = ch32_i2c_multi_session_acquire(node, deadline);
+    if (result != CH32_I2C_MULTI_RESULT_OK) return result;
+    request_id = ++s_request_ids[node->node_id - I2C_NODE_ID_MIN];
+    if (request_id == 0U) {
+        request_id = ++s_request_ids[node->node_id - I2C_NODE_ID_MIN];
+    }
+    command[4] = request_id;
+    ch32_can_gateway_core_session_drain(I2C_DEVICE_TYPE, node->node_id);
+    result = ch32_i2c_multi_send_until(CAN_ID_CMD_BASE + node->node_id,
+                                       command, 8U, deadline);
+    if (result != CH32_I2C_MULTI_RESULT_OK) {
+        ch32_i2c_multi_session_release(node);
+        return result;
+    }
+    while ((int32_t)(deadline - ch32_i2c_multi_now_ms()) > 0) {
+        ch32_i2c_multi_can_frame_t frame;
+        ch32_i2c_multi_result_t poll_result =
+            ch32_i2c_multi_session_poll(node, &frame, deadline);
+        if (poll_result != CH32_I2C_MULTI_RESULT_OK) {
+            if (poll_result == CH32_I2C_MULTI_RESULT_OVERFLOW) {
+                ch32_i2c_multi_session_release(node);
+                return poll_result;
+            }
+            continue;
+        }
+        if (frame.id == CAN_ID_STATUS_BASE + node->node_id && frame.dlc == 8U &&
+            frame.data[0] == I2C_STATUS_READ_CHUNK && frame.data[1] == request_id &&
+            frame.data[3] <= 4U && (uint16_t)frame.data[2] + frame.data[3] <= read_len) {
+            memcpy(&read_data[frame.data[2]], &frame.data[4], frame.data[3]);
+            if ((uint8_t)(frame.data[2] + frame.data[3]) > received) received = (uint8_t)(frame.data[2] + frame.data[3]);
+        } else if (frame.id == CAN_ID_STATUS_BASE + node->node_id && frame.dlc == 8U &&
+                   frame.data[0] == I2C_STATUS_READ_DONE && frame.data[1] == request_id &&
+                   frame.data[2] == addr && frame.data[4] == read_len) {
+            done_received = true; done_success = frame.data[5] != 0U && frame.data[6] == read_len;
+        } else if (frame.id == CAN_ID_ACK_BASE + node->node_id && frame.dlc == 8U &&
+                   frame.data[0] == I2C_CMD_WRITE_READ && frame.data[2] == node->node_id &&
+                   frame.data[3] == I2C_DEVICE_TYPE) {
+            ack_received = true; ack_success = frame.data[1] != 0U;
+        }
+        if (done_received && ack_received) {
+            result = done_success && ack_success && received == read_len ?
+                     CH32_I2C_MULTI_RESULT_OK : CH32_I2C_MULTI_RESULT_COMM_FAIL;
+            ch32_i2c_multi_session_release(node); return result;
+        }
+    }
+    ch32_i2c_multi_session_release(node);
+    return CH32_I2C_MULTI_RESULT_TIMEOUT;
+}
+
+ch32_i2c_multi_result_t ch32_i2c_multi_write_read_to(
+    const ch32_i2c_multi_node_t *node, uint8_t addr,
+    const uint8_t *write_data, uint8_t write_len,
+    uint8_t *read_data, uint8_t read_len)
+{
+    return ch32_i2c_multi_write_read_to_timeout(
+        node, addr, write_data, write_len, read_data, read_len,
+        s_cfg.command_timeout_ms);
+}
 
 static ch32_i2c_multi_result_t ch32_i2c_multi_set_speed(
     ch32_i2c_multi_node_t *node, uint8_t speed_code)
 {
     uint8_t command[8] = {I2C_CMD_SET_SPEED, speed_code, 0U, 0U,
-                          0U, 0U, 0U, 0U};
-    return ch32_i2c_multi_run_command(node, command, I2C_STATUS_SPEED,
-                                      0U, speed_code, NULL);
+                           0U, 0U, 0U, 0U};
+    ch32_i2c_multi_result_t result;
+
+    if (!ch32_i2c_multi_node_valid(node)) {
+        return CH32_I2C_MULTI_RESULT_INVALID_ARG;
+    }
+    if (node->speed_valid && node->active_speed_code == speed_code) {
+        return CH32_I2C_MULTI_RESULT_OK;
+    }
+    result = ch32_i2c_multi_run_command_timeout(
+        node, command, I2C_STATUS_SPEED, 0U, speed_code, NULL,
+        s_cfg.command_timeout_ms);
+    if (result == CH32_I2C_MULTI_RESULT_OK) {
+        node->active_speed_code = speed_code;
+        node->speed_valid = true;
+    }
+    return result;
 }
 
 ch32_i2c_multi_result_t ch32_i2c_multi_set_speed_100k(
@@ -817,6 +1102,8 @@ const char *ch32_i2c_multi_result_text(ch32_i2c_multi_result_t result)
         return "INVALID_ARG";
     case CH32_I2C_MULTI_RESULT_BUSY:
         return "BUSY";
+    case CH32_I2C_MULTI_RESULT_OVERFLOW:
+        return "OVERFLOW";
     default:
         return "UNKNOWN";
     }

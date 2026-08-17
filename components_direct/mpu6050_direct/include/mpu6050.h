@@ -8,17 +8,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-
-#ifndef ERR_TIMEOUT
-#define ERR_TIMEOUT                         -1
-#define ERR_BUSY                            -2
-#define ERR_NOT_INIT                        -3
-#define ERR_INVALID_PARAM                   -4
-#define ERR_NOT_SUPPORTED                   -5
-#define ERR_OVERFLOW                        -6
-#define ERR_NO_DEVICE                       -7
-#define ERR_HW_FAULT                        -8
-#endif
+#include "module_errors.h"
 
 #define ERR_MPU6050_ID_MISMATCH             -10
 #define ERR_MPU6050_CALIBRATION             -11
@@ -26,13 +16,12 @@
 
 #define MPU6050_I2C_ADDR                    0x68U
 #define MPU6050_I2C_FREQ_HZ                 400000U
-#define MPU6050_I2C_TIMEOUT_MS              1000U
+#define MPU6050_I2C_TIMEOUT_MS              100U
 #define MPU6050_SAMPLE_RATE_HZ              100U
-#define MPU6050_CALIBRATION_SAMPLES         200U
+/* Provisional tunables pending stationary-noise hardware validation. */
+#define MPU6050_CALIBRATION_SAMPLES         50U
+#define MPU6050_CALIBRATION_TIMEOUT_MS      2000U
 #define MPU6050_COMPLEMENTARY_ALPHA_DEFAULT 0.98f
-
-#define PIN_MPU6050_SDA                     21
-#define PIN_MPU6050_SCL                     22
 
 typedef struct {
     uint8_t i2c_addr;
@@ -40,7 +29,6 @@ typedef struct {
     uint32_t timeout_ms;
     uint16_t calibration_samples;
     float complementary_alpha;
-    bool initialize_i2c;
 } mpu6050_cfg_t;
 
 typedef struct {
@@ -48,6 +36,7 @@ typedef struct {
     float pitch_deg;
     float yaw_deg;
     bool valid;
+    bool accel_correction_used;
     uint32_t sample_count;
 } mpu6050_orientation_t;
 

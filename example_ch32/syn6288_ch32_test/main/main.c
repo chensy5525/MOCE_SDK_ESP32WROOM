@@ -9,15 +9,17 @@
 #include <stdio.h>
 
 #define SYN6288E_EXAMPLE_MAX_NODES          6U
-#define SYN6288E_EXAMPLE_DISCOVERY_MS       3000U
-#define SYN6288E_EXAMPLE_REDISCOVERY_MS     3000U
-#define SYN6288E_EXAMPLE_BROADCAST_MS       1000U
-#define SYN6288E_EXAMPLE_INVENTORY_MS       5000U
+#define SYN6288E_EXAMPLE_DISCOVERY_MS       1000U
+#define SYN6288E_EXAMPLE_REDISCOVERY_MS     10000U
+#define SYN6288E_EXAMPLE_FAST_FIRST_MS      250U
+#define SYN6288E_EXAMPLE_FAST_MAX_MS        2000U
+#define SYN6288E_EXAMPLE_DURATION_MS         60000U
 
 static ch32_uart_dynamic_node_t s_nodes[SYN6288E_EXAMPLE_MAX_NODES];
 static size_t s_node_count;
 static syn6288e_t s_speech;
 static ch32_uart_dynamic_node_t *s_active_node;
+static const uint8_t s_danger_text_gbk[] = {0xCEU, 0xA3U, 0xCFU, 0xD5U};
 
 static ch32_uart_dynamic_node_t *syn6288e_find_ready_node(void)
 {
@@ -64,24 +66,11 @@ static bool syn6288e_discover_and_bind(void)
     return true;
 }
 
-static void syn6288e_inventory_task(void *argument)
-{
-    (void)argument;
-    for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(SYN6288E_EXAMPLE_INVENTORY_MS));
-        ch32_uart_dynamic_result_t result =
-            ch32_uart_dynamic_discover_incremental(
-                s_nodes, SYN6288E_EXAMPLE_MAX_NODES, &s_node_count);
-        printf("[INF][SYN6288E_EXAMPLE] inventory result=%s count=%u\n",
-               ch32_uart_dynamic_result_text(result),
-               (unsigned)s_node_count);
-    }
-}
-
 void app_main(void)
 {
     ch32_uart_dynamic_config_t uart_config;
-    TickType_t last_wake_time;
+    int result;
+    uint32_t retry_delay_ms = SYN6288E_EXAMPLE_FAST_FIRST_MS;
 
     ch32_uart_dynamic_default_config(&uart_config);
     uart_config.discovery_window_ms = SYN6288E_EXAMPLE_DISCOVERY_MS;
@@ -91,22 +80,23 @@ void app_main(void)
     }
 
     while (!syn6288e_discover_and_bind()) {
-        vTaskDelay(pdMS_TO_TICKS(SYN6288E_EXAMPLE_REDISCOVERY_MS));
+        vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+        retry_delay_ms = retry_delay_ms < SYN6288E_EXAMPLE_FAST_MAX_MS
+                             ? retry_delay_ms * 2U
+                             : SYN6288E_EXAMPLE_REDISCOVERY_MS;
     }
-    if (xTaskCreate(syn6288e_inventory_task, "syn_inventory", 4096U,
-                    NULL, 4U, NULL) != pdPASS) {
-        printf("[ERR][SYN6288E_EXAMPLE] inventory task create failed\n");
-        return;
+    result = syn6288e_speak_gbk(&s_speech, s_danger_text_gbk,
+                                sizeof(s_danger_text_gbk));
+    if (result != 0) {
+        printf("[WRN][SYN6288E_EXAMPLE] speak danger failed err=%d\n",
+               result);
+    } else {
+        printf("[INF][SYN6288E_EXAMPLE] observing for %u ms\n",
+               SYN6288E_EXAMPLE_DURATION_MS);
+        vTaskDelay(pdMS_TO_TICKS(SYN6288E_EXAMPLE_DURATION_MS));
     }
-
-    last_wake_time = xTaskGetTickCount();
-    while (true) {
-        int result = syn6288e_speak_danger(&s_speech);
-        if (result != 0) {
-            printf("[WRN][SYN6288E_EXAMPLE] speak danger failed err=%d\n",
-                   result);
-        }
-        vTaskDelayUntil(&last_wake_time,
-                        pdMS_TO_TICKS(SYN6288E_EXAMPLE_BROADCAST_MS));
+    if (syn6288e_deinit(&s_speech) != 0) {
+        printf("[ERR][SYN6288E_EXAMPLE] deinit failed\n");
     }
+    printf("[INF][SYN6288E_EXAMPLE] test complete\n");
 }

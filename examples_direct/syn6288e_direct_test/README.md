@@ -1,6 +1,7 @@
 # syn6288e_direct_test
 
-ESP32-WROOM UART1 直连 SYN6288E 的最小例程，每隔 1 秒播报一次“危险”。
+ESP32-WROOM UART1 直连 SYN6288E 的最小例程。初始化成功后只发送一次“危险”
+语音帧，避免重复播报；发送成功后保持实例 60 秒，再反初始化并返回。
 
 - ESP32 TX GPIO17 连接 SYN6288E RXD。
 - ESP32 RX GPIO16 连接 SYN6288E TXD（如果模块引出 TXD）。

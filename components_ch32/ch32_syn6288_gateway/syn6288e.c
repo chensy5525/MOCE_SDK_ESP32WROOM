@@ -5,12 +5,6 @@
 
 #define SYN6288E_LOG_TAG "SYN6288E"
 
-/* SYN6288E GBK text frame for "危险". */
-static const uint8_t SYN6288E_DANGER_FRAME[] = {
-    0xFD, 0x00, 0x07, 0x01, 0x01,
-    0xCE, 0xA3, 0xCF, 0xD5, 0x8D,
-};
-
 static int syn6288e_map_gateway_result(ch32_uart_dynamic_result_t result)
 {
     switch (result) {
@@ -51,7 +45,6 @@ int syn6288e_init(syn6288e_t *device, const syn6288e_config_t *config)
 
     memset(device, 0, sizeof(*device));
     device->ch32_node = config->ch32_node;
-    device->state = SYN6288E_STATE_READY;
     device->initialized = true;
     printf("[INF][%s] init OK, token=0x%04X node=%u baud=%u\n",
            SYN6288E_LOG_TAG, device->ch32_node->token,
@@ -82,22 +75,21 @@ int syn6288e_send_raw(syn6288e_t *device, const uint8_t *frame,
         return ERR_INVALID_PARAM;
     }
     if (!device->ch32_node->ready) {
-        device->state = SYN6288E_STATE_FAULT;
         return ERR_NO_DEVICE;
     }
 
     gateway_result = ch32_uart_dynamic_send(device->ch32_node, frame, length);
     result = syn6288e_map_gateway_result(gateway_result);
     if (result == 0) {
-        device->state = SYN6288E_STATE_READY;
-        printf("[INF][%s] SYN6288E_TX route=CH32_UART node=%u result=OK\n",
-               SYN6288E_LOG_TAG, device->ch32_node->node_id);
+        printf("[INF][%s] transport=DELIVERED route=CH32_UART node=%u "
+               "bytes=%u\n",
+               SYN6288E_LOG_TAG, device->ch32_node->node_id,
+               (unsigned)length);
     } else if (result == ERR_TIMEOUT) {
         printf("[WRN][%s] communication timeout node=%u result=%s\n",
                SYN6288E_LOG_TAG, device->ch32_node->node_id,
                ch32_uart_dynamic_result_text(gateway_result));
     } else {
-        device->state = SYN6288E_STATE_FAULT;
         printf("[ERR][%s] transmit failed node=%u result=%s\n",
                SYN6288E_LOG_TAG, device->ch32_node->node_id,
                ch32_uart_dynamic_result_text(gateway_result));
@@ -105,20 +97,29 @@ int syn6288e_send_raw(syn6288e_t *device, const uint8_t *frame,
     return result;
 }
 
-int syn6288e_speak_danger(syn6288e_t *device)
+int syn6288e_speak_gbk(syn6288e_t *device, const uint8_t *text,
+                       size_t text_length)
 {
-    return syn6288e_send_raw(device, SYN6288E_DANGER_FRAME,
-                             sizeof(SYN6288E_DANGER_FRAME));
-}
+    uint8_t frame[SYN6288E_MAX_FRAME_LENGTH];
+    size_t frame_length;
+    uint16_t data_length;
+    uint8_t checksum = 0U;
 
-int syn6288e_get_state(const syn6288e_t *device, syn6288e_state_t *state)
-{
-    if (device == NULL || state == NULL) {
+    if (text == NULL || text_length == 0U ||
+        text_length > SYN6288E_MAX_TEXT_LENGTH) {
         return ERR_INVALID_PARAM;
     }
-    if (!device->initialized) {
-        return ERR_NOT_INIT;
+    data_length = (uint16_t)text_length + 3U;
+    frame_length = text_length + 6U;
+    frame[0] = 0xFDU;
+    frame[1] = (uint8_t)(data_length >> 8U);
+    frame[2] = (uint8_t)data_length;
+    frame[3] = 0x01U;
+    frame[4] = 0x01U;
+    memcpy(&frame[5], text, text_length);
+    for (size_t index = 0U; index < frame_length - 1U; ++index) {
+        checksum ^= frame[index];
     }
-    *state = device->state;
-    return 0;
+    frame[frame_length - 1U] = checksum;
+    return syn6288e_send_raw(device, frame, frame_length);
 }
