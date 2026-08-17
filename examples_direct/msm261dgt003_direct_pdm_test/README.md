@@ -11,8 +11,8 @@ Wiring follows the current board/module schematics:
 - module SD -> GPIO2 / `I2S_SD`
 - module L/R selection must match `MSM261DGT003_DIRECT_PDM_SELECT_LOW`
 
-The example starts 44.1 kHz signed 16-bit mono capture and logs the peak and
-mean absolute value for each 512-sample block. A louder nearby sound should
+The example starts 44.1 kHz signed 16-bit mono capture and periodically logs
+the peak and mean absolute value from a 512-sample block. A louder nearby sound should
 increase both values; this is a functional signal check, not calibrated SPL.
 
 Build from the repository root in an initialized ESP-IDF shell:

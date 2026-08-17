@@ -8,6 +8,10 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 
+#if BOARD_I2S_PDM_RX_PORT != 0
+#error "Classic ESP32 PDM RX is only supported on I2S0"
+#endif
+
 static const char *TAG = "bsp_i2s";
 
 static i2s_chan_handle_t s_rx_handle;

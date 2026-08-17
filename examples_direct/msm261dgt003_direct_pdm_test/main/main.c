@@ -4,10 +4,14 @@
 #include "board.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "msm261dgt003_direct_pdm.h"
 
 #define MICROPHONE_SAMPLE_COUNT 512U
 #define MICROPHONE_READ_TIMEOUT_MS 1000U
+#define MICROPHONE_LOG_EVERY_BLOCKS 32U
+#define MICROPHONE_ERROR_RETRY_MS 100U
 
 static const char *TAG = "msm261_pdm_test";
 
@@ -69,10 +73,13 @@ void app_main(void)
             MICROPHONE_READ_TIMEOUT_MS);
         if (error != ESP_OK) {
             ESP_LOGE(TAG, "PCM read failed: %s", esp_err_to_name(error));
+            vTaskDelay(pdMS_TO_TICKS(MICROPHONE_ERROR_RETRY_MS));
             continue;
         }
 
         ++block_number;
-        log_pcm_level(samples, samples_read, block_number);
+        if ((block_number % MICROPHONE_LOG_EVERY_BLOCKS) == 0U) {
+            log_pcm_level(samples, samples_read, block_number);
+        }
     }
 }

@@ -18,7 +18,7 @@ node_plan:
     - msm261dgt003 -> native I2S0
 required_behavior:
   - initialize 44.1 kHz signed 16-bit mono PCM acquisition
-  - print sample count, peak magnitude, and mean absolute magnitude for each block
+  - periodically print sample count, peak magnitude, and mean absolute magnitude without saturating the serial log
 esp32_responsibilities:
   - own the I2S0 PDM RX lifecycle
   - perform bounded reads

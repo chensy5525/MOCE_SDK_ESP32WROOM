@@ -1,6 +1,6 @@
 # MSM261DGT003 实现导读
 
-status: `stage1_draft`
+status: `stage1_confirmed_2026-08-17`
 
 本文只说明 Stage 2 的建议实现边界和审查入口，不授权继续生成、提交或声明
 驱动通过。

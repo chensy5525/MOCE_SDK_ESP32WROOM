@@ -11,7 +11,8 @@ clock and data GPIOs. The default function intentionally leaves both pins as
 The driver outputs signed 16-bit mono PCM. It supports 16-48 kHz PCM rates and
 selects 64x or 128x downsampling so the generated microphone clock stays in
 the MSM261DGT003 standard-performance range of 1.1-4.0 MHz. L/R channel
-selection must match the measured SW2/L/R voltage on the module.
+selection must match the measured SW2/L/R voltage on the module. ESP-IDF maps
+L/R pulled low to the left PDM slot and L/R pulled high to the right PDM slot.
 
 No gain, filtering, volume threshold, VAD, playback, AEC, calibrated SPL, or
 application state machine belongs in this driver. Calls are synchronous and

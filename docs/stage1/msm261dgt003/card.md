@@ -1,6 +1,6 @@
 # MSM261DGT003 麦克风模块卡
 
-status: `draft_pending_user_confirmation`
+status: `confirmed_2026-08-17`
 
 本卡是新模块 Stage 1 的唯一事实入口草案。它只冻结输入、约束和验证边界，
 不代表驱动、例程、编译或上板已经通过。
@@ -27,10 +27,13 @@ status: `draft_pending_user_confirmation`
 | `第一批模块资料（新）/ESP32/SCH_ESP32-WROOM-32_2026-08-17.pdf` | 文件批次 2026-08-17；主板 V1.0，页面更新至 2026-08-13 | ESP32 I2S 网络与 GPIO |
 | `第一批模块资料（新）/ESP32转接板新版/SCH_ESP32转接板新版_2026-08-17.pdf` | 文件批次 2026-08-17；V1.0，更新 2026-08-13 | 麦克风座线序与主板转接关系 |
 | `boards/my_board_esp32wroom/board.h` | 当前仓库版本 | 软件资源名和现存资源冲突 |
+| MEMSensing `MSM261DGT003 Data Sheet` | Ver. 1.0，DOC NO DS-042，2021-09；LCSC 镜像 | 工作电压、工作模式、时钟范围、接口时序和 L/R 语义 |
 
-当前可见资料中没有 MSM261DGT003 官方数据手册 PDF。电气极限、PDM 时钟
-上下限、建立时间以及 L/R 与采样槽的精确映射，在取得官方资料前不得提升为
-“新版资料已确认事实”。
+新版本地资料包中没有器件数据手册，但已复核厂商编写的数据手册镜像。手册
+PDF 第 3 页给出 VDD=1.6–3.6 V、标准性能模式 PDM CLK=1.1–4.0 MHz；
+第 5 页给出时钟占空比 40%–60%；第 7 页给出 L/R 高低电平的数据边沿关系。
+ESP-IDF 6.0.2 `i2s_types.h` 进一步明确：select 上拉对应 right slot，select
+下拉对应 left slot。模块使用的 3.3 V 位于允许工作范围内。
 
 ## 3. 新版硬件连接
 
@@ -45,6 +48,7 @@ status: `draft_pending_user_confirmation`
 确认事项：
 
 - SW2 将 U2 的 L/R 引脚切换到 3.3 V 或 GND。
+- SW2 选择 3.3 V 时配置 right slot，选择 GND 时配置 left slot。
 - C1=100 nF，跨接 U2 VDD 与 GND。
 - 新版主板原理图将 GPIO18 标为 `I2S_SCK`、GPIO2 标为 `I2S_SD`。
 - 当前仓库板卡文件仍同时把 GPIO18 定义为 `BOARD_SPI_SCK_GPIO`；I2S 与 SPI
@@ -121,17 +125,17 @@ validation 只能标记为 `compile_passed` 或 `untested`。
 
 ## 9. 待确认和待验证
 
-- [ ] 用户确认本卡可作为 Stage 1 冻结输入。
-- [ ] 补充 MSM261DGT003 官方数据手册及版本号。
-- [ ] 依据官方资料确认工作电压、PDM 时钟范围和时序条件。
-- [ ] 确认 SW2 高/低电平分别对应 ESP-IDF 左/右 PDM slot 的哪一项。
-- [ ] 确认目标基础采样率；当前实现导读建议先用 44.1 kHz。
+- [x] 用户确认本卡可作为 Stage 1 冻结输入（2026-08-17）。
+- [x] 复核 MSM261DGT003 Data Sheet Ver. 1.0 / DS-042。
+- [x] 依据数据手册确认工作电压、标准性能时钟范围和占空比条件。
+- [x] 确认 SW2 高电平对应 right slot、低电平对应 left slot。
+- [x] 第一版基础采样率冻结为 44.1 kHz。
 - [ ] 实测 GPIO2 连接模块后的上电启动和下载模式。
 - [ ] 确认使用麦克风时 SPI 不占用 GPIO18。
 
 ## 10. 阶段状态
 
-Stage 1：`awaiting_user_confirmation`
+Stage 1：`confirmed_2026-08-17`
 
-Stage 2：未因本卡生成而自动授权。仓库中此前产生的未提交 BSP/component/example
-改动仅视为草案，不作为本卡的事实来源，也不构成编译或上板证据。
+Stage 2：用户于 2026-08-17 单独授权继续 BSP、component 和 direct example。
+编译与上板状态仍必须由 validation context 独立记录。

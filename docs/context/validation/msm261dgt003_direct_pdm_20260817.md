@@ -7,7 +7,8 @@ related_contracts:
     - docs/context/transports/esp32_native_pdm_i2s0.md
   device_contexts:
     - docs/context/devices/msm261dgt003.md
-  recipe_contexts: []
+  recipe_contexts:
+    - docs/context/recipes/msm261dgt003_direct_pdm_test.md
 supported_boards:
   - my_board_esp32wroom
 source_paths:
@@ -21,13 +22,13 @@ source_paths:
     - docs/context/transports/esp32_native_pdm_i2s0.md
     - docs/context/recipes/msm261dgt003_direct_pdm_test.md
 build:
-  command: idf.py -C examples_direct/msm261dgt003_direct_pdm_test build
+  command: idf.py --no-ccache -C examples_direct/msm261dgt003_direct_pdm_test build
   status: compile_passed
   scope: full example configure, compile, link, binary generation, and size check after BSP split
   full_application_link: passed
   compiler_flags: ESP-IDF defaults including -Wall and -Werror
   toolchain: ESP-IDF 6.0.2, xtensa-esp-elf GCC 15.2.0; repository submodule unavailable
-  image_size_bytes: 161472
+  image_size_bytes: 161488
   app_partition_size_bytes: 1048576
   app_partition_free_percent: 85
   iram_used_bytes: 46171
@@ -47,7 +48,10 @@ prior_baseline_evidence:
   result: 44.1 kHz PCM acquisition and voice-responsive RMS were observed
   limitation: prior evidence does not validate the renamed repository components
 expected_serial_log:
+  - recipe=msm261dgt003_direct_pdm_test
+  - transport=I2S0 PDM RX, CLK=GPIO18, DATA=GPIO2
   - PCM=44100 Hz, PDM CLK=2822400 Hz, DSR=64
+  - periodically: block=<n> samples=512 peak=<n> mean_abs=<n>
 expected_behavior:
   - a caller-provided PCM buffer receives signed 16-bit mono samples
 failure_behavior:
