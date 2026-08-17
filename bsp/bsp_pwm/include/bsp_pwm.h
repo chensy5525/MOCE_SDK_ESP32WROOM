@@ -27,6 +27,11 @@ typedef struct {
 esp_err_t bsp_pwm_timer_init(const bsp_pwm_timer_config_t *config);
 esp_err_t bsp_pwm_channel_init(const bsp_pwm_channel_config_t *config);
 esp_err_t bsp_pwm_set_duty(ledc_mode_t speed_mode, ledc_channel_t channel, uint32_t duty);
+esp_err_t bsp_pwm_stop(ledc_mode_t speed_mode,
+                       ledc_channel_t channel,
+                       uint32_t idle_level);
+esp_err_t bsp_pwm_timer_deinit(ledc_mode_t speed_mode,
+                              ledc_timer_t timer_num);
 uint32_t bsp_pwm_max_duty(ledc_timer_bit_t duty_resolution);
 
 #ifdef __cplusplus

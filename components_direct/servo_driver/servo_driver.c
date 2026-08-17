@@ -1,134 +1,353 @@
 #include "servo_driver.h"
 
-#include <inttypes.h>
-#include <stdbool.h>
-#include <string.h>
+#include <stddef.h>
 
-#include "board.h"
 #include "esp_check.h"
 #include "esp_log.h"
 
 static const char *TAG = "servo_driver";
 
-static const servo_driver_channel_config_t s_default_channels[SERVO_DRIVER_MAX_CHANNELS] = {
-    {.name = "PWMB1", .gpio = BOARD_PWM_B1_GPIO, .ledc_channel = LEDC_CHANNEL_1},
-    {.name = "PWMB2", .gpio = BOARD_PWM_B2_GPIO, .ledc_channel = LEDC_CHANNEL_2},
-    {.name = "PWMB3", .gpio = BOARD_PWM_B3_GPIO, .ledc_channel = LEDC_CHANNEL_3},
-    {.name = "PWMB4", .gpio = BOARD_PWM_B4_GPIO, .ledc_channel = LEDC_CHANNEL_4},
-};
-
-static servo_driver_config_t s_config;
-static uint32_t s_duty_max = 0U;
-static uint32_t s_period_us = SERVO_DRIVER_DEFAULT_PERIOD_US;
-static bool s_initialized = false;
-
-void servo_driver_default_config(servo_driver_config_t *config)
+static bool position_is_valid(ServoPosition position)
 {
-    if (config == NULL) {
-        return;
+    switch (position) {
+        case SERVO_POSITION_0_DEG:
+        case SERVO_POSITION_45_DEG:
+        case SERVO_POSITION_90_DEG:
+        case SERVO_POSITION_135_DEG:
+        case SERVO_POSITION_180_DEG:
+            return true;
+        default:
+            return false;
     }
-
-    config->speed_mode = LEDC_HIGH_SPEED_MODE;
-    config->timer = LEDC_TIMER_1;
-    config->duty_resolution = LEDC_TIMER_14_BIT;
-    config->frequency_hz = SERVO_DRIVER_DEFAULT_FREQ_HZ;
-    config->min_pulse_us = SERVO_DRIVER_DEFAULT_MIN_US;
-    config->center_pulse_us = SERVO_DRIVER_DEFAULT_CENTER_US;
-    config->max_pulse_us = SERVO_DRIVER_DEFAULT_MAX_US;
-    config->channels = s_default_channels;
-    config->channel_count = SERVO_DRIVER_MAX_CHANNELS;
 }
 
-uint32_t servo_driver_angle_to_pulse_us(uint16_t angle_deg)
+static esp_err_t position_to_pulse_width(const ServoDriverConfig *config,
+                                         ServoPosition position,
+                                         uint32_t *pulse_width_us)
 {
-    if (angle_deg > 180U) {
-        angle_deg = 180U;
+    if ((config == NULL) || (pulse_width_us == NULL)) {
+        return ESP_ERR_INVALID_ARG;
     }
 
-    uint32_t span = s_config.max_pulse_us - s_config.min_pulse_us;
-    return s_config.min_pulse_us + ((span * angle_deg) / 180U);
-}
-
-uint32_t servo_driver_pulse_us_to_duty(uint32_t pulse_us)
-{
-    return (pulse_us * s_duty_max) / s_period_us;
-}
-
-esp_err_t servo_driver_init(const servo_driver_config_t *config)
-{
-    servo_driver_config_t local_config;
-
-    if (config == NULL) {
-        servo_driver_default_config(&local_config);
-        config = &local_config;
+    switch (position) {
+        case SERVO_POSITION_0_DEG:
+            *pulse_width_us = config->pulse_0_us;
+            break;
+        case SERVO_POSITION_45_DEG:
+            *pulse_width_us = config->pulse_45_us;
+            break;
+        case SERVO_POSITION_90_DEG:
+            *pulse_width_us = config->pulse_90_us;
+            break;
+        case SERVO_POSITION_135_DEG:
+            *pulse_width_us = config->pulse_135_us;
+            break;
+        case SERVO_POSITION_180_DEG:
+            *pulse_width_us = config->pulse_180_us;
+            break;
+        default:
+            return ESP_ERR_INVALID_ARG;
     }
 
-    ESP_RETURN_ON_FALSE(config->channels != NULL, ESP_ERR_INVALID_ARG, TAG, "channels is null");
-    ESP_RETURN_ON_FALSE(config->channel_count > 0U, ESP_ERR_INVALID_ARG, TAG, "channel count is zero");
+    return ESP_OK;
+}
+
+static esp_err_t validate_config(const ServoDriverConfig *config)
+{
+    ESP_RETURN_ON_FALSE(config != NULL,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "config is null");
+    ESP_RETURN_ON_FALSE(config->channel_count > 0U,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "channel count is zero");
     ESP_RETURN_ON_FALSE(config->channel_count <= SERVO_DRIVER_MAX_CHANNELS,
-                        ESP_ERR_INVALID_ARG, TAG, "too many channels");
-    ESP_RETURN_ON_FALSE(config->frequency_hz > 0U, ESP_ERR_INVALID_ARG, TAG, "bad frequency");
-    ESP_RETURN_ON_FALSE(config->min_pulse_us < config->center_pulse_us,
-                        ESP_ERR_INVALID_ARG, TAG, "bad min/center pulse");
-    ESP_RETURN_ON_FALSE(config->center_pulse_us < config->max_pulse_us,
-                        ESP_ERR_INVALID_ARG, TAG, "bad center/max pulse");
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "too many channels");
+    ESP_RETURN_ON_FALSE(config->frequency_hz == SERVO_DRIVER_PWM_FREQUENCY_HZ,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "frequency must be 50 Hz");
+    ESP_RETURN_ON_FALSE((uint32_t)config->duty_resolution < 32U,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "duty resolution is invalid");
+    ESP_RETURN_ON_FALSE(config->pulse_0_us > 0U,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "0-degree pulse is zero");
+    ESP_RETURN_ON_FALSE(config->pulse_0_us < config->pulse_45_us,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "0/45-degree pulses are invalid");
+    ESP_RETURN_ON_FALSE(config->pulse_45_us < config->pulse_90_us,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "45/90-degree pulses are invalid");
+    ESP_RETURN_ON_FALSE(config->pulse_90_us < config->pulse_135_us,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "90/135-degree pulses are invalid");
+    ESP_RETURN_ON_FALSE(config->pulse_135_us < config->pulse_180_us,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "135/180-degree pulses are invalid");
+    ESP_RETURN_ON_FALSE(position_is_valid(config->initial_position),
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "initial position is invalid");
 
-    memcpy(&s_config, config, sizeof(s_config));
-    s_duty_max = (1UL << s_config.duty_resolution) - 1U;
-    s_period_us = 1000000UL / s_config.frequency_hz;
+    uint32_t period_us = 1000000U / config->frequency_hz;
+    ESP_RETURN_ON_FALSE(config->pulse_180_us < period_us,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "pulse width exceeds PWM period");
 
-    ledc_timer_config_t timer = {
-        .speed_mode = s_config.speed_mode,
-        .duty_resolution = s_config.duty_resolution,
-        .timer_num = s_config.timer,
-        .freq_hz = s_config.frequency_hz,
-        .clk_cfg = LEDC_AUTO_CLK,
+    for (uint8_t index = 0U; index < config->channel_count; ++index) {
+        ESP_RETURN_ON_FALSE(GPIO_IS_VALID_OUTPUT_GPIO(config->channels[index].gpio),
+                            ESP_ERR_INVALID_ARG,
+                            TAG,
+                            "channel GPIO is not output-capable");
+
+        for (uint8_t previous = 0U; previous < index; ++previous) {
+            ESP_RETURN_ON_FALSE(
+                config->channels[index].gpio != config->channels[previous].gpio,
+                ESP_ERR_INVALID_ARG,
+                TAG,
+                "duplicate channel GPIO");
+            ESP_RETURN_ON_FALSE(
+                config->channels[index].ledc_channel !=
+                    config->channels[previous].ledc_channel,
+                ESP_ERR_INVALID_ARG,
+                TAG,
+                "duplicate LEDC channel");
+        }
+    }
+
+    return ESP_OK;
+}
+
+static uint32_t pulse_width_to_duty(const ServoDriver *driver,
+                                    uint32_t pulse_width_us)
+{
+    uint64_t scaled_duty = (uint64_t)pulse_width_us * driver->max_duty;
+    return (uint32_t)((scaled_duty + (driver->pwm_period_us / 2U)) /
+                      driver->pwm_period_us);
+}
+
+esp_err_t servo_driver_config_default(ServoDriverConfig *config)
+{
+    if (config == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *config = (ServoDriverConfig) {
+        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .timer = LEDC_TIMER_1,
+        .duty_resolution = LEDC_TIMER_16_BIT,
+        .frequency_hz = SERVO_DRIVER_PWM_FREQUENCY_HZ,
+        .pulse_0_us = SERVO_DRIVER_DEFAULT_0_PULSE_US,
+        .pulse_45_us = SERVO_DRIVER_DEFAULT_45_PULSE_US,
+        .pulse_90_us = SERVO_DRIVER_DEFAULT_90_PULSE_US,
+        .pulse_135_us = SERVO_DRIVER_DEFAULT_135_PULSE_US,
+        .pulse_180_us = SERVO_DRIVER_DEFAULT_180_PULSE_US,
+        .initial_position = SERVO_POSITION_90_DEG,
+        .channels = {{0}},
+        .channel_count = 0U,
     };
-    ESP_RETURN_ON_ERROR(ledc_timer_config(&timer), TAG, "timer config failed");
+    return ESP_OK;
+}
 
-    uint32_t center_duty = servo_driver_pulse_us_to_duty(s_config.center_pulse_us);
-    for (uint8_t i = 0U; i < s_config.channel_count; ++i) {
-        ledc_channel_config_t channel = {
-            .gpio_num = s_config.channels[i].gpio,
-            .speed_mode = s_config.speed_mode,
-            .channel = s_config.channels[i].ledc_channel,
-            .intr_type = LEDC_INTR_DISABLE,
-            .timer_sel = s_config.timer,
-            .duty = center_duty,
-            .hpoint = 0,
+esp_err_t servo_driver_init(ServoDriver *driver,
+                            const ServoDriverConfig *config)
+{
+    if (driver == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (driver->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_RETURN_ON_ERROR(validate_config(config), TAG, "invalid configuration");
+
+    ServoDriver candidate = {0};
+    candidate.config = *config;
+    candidate.pwm_period_us = 1000000U / config->frequency_hz;
+    candidate.max_duty = bsp_pwm_max_duty(config->duty_resolution);
+    ESP_RETURN_ON_FALSE(candidate.max_duty > 0U,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "duty resolution is unsupported");
+
+    uint32_t initial_pulse_us = 0U;
+    ESP_RETURN_ON_ERROR(position_to_pulse_width(config,
+                                                config->initial_position,
+                                                &initial_pulse_us),
+                        TAG,
+                        "initial position is invalid");
+    uint32_t initial_duty = pulse_width_to_duty(&candidate, initial_pulse_us);
+
+    bsp_pwm_timer_config_t timer_config = {
+        .speed_mode = config->speed_mode,
+        .timer_num = config->timer,
+        .duty_resolution = config->duty_resolution,
+        .frequency_hz = config->frequency_hz,
+    };
+    ESP_RETURN_ON_ERROR(bsp_pwm_timer_init(&timer_config),
+                        TAG,
+                        "PWM timer initialization failed");
+
+    uint8_t initialized_channels = 0U;
+    for (uint8_t index = 0U; index < config->channel_count; ++index) {
+        bsp_pwm_channel_config_t channel_config = {
+            .gpio_num = config->channels[index].gpio,
+            .speed_mode = config->speed_mode,
+            .channel = config->channels[index].ledc_channel,
+            .timer_num = config->timer,
+            .duty = initial_duty,
         };
-        ESP_RETURN_ON_ERROR(ledc_channel_config(&channel), TAG, "channel config failed");
+        esp_err_t error = bsp_pwm_channel_init(&channel_config);
+        if (error != ESP_OK) {
+            for (uint8_t rollback = 0U;
+                 rollback < initialized_channels;
+                 ++rollback) {
+                (void)bsp_pwm_stop(config->speed_mode,
+                                   config->channels[rollback].ledc_channel,
+                                   0U);
+            }
+            (void)bsp_pwm_timer_deinit(config->speed_mode, config->timer);
+            ESP_LOGE(TAG,
+                     "PWM channel %u initialization failed: %s",
+                     (unsigned)index,
+                     esp_err_to_name(error));
+            return error;
+        }
+
+        candidate.commanded_positions[index] = config->initial_position;
+        ++initialized_channels;
     }
 
-    s_initialized = true;
+    candidate.initialized = true;
+    *driver = candidate;
     return ESP_OK;
 }
 
-esp_err_t servo_driver_set_angle(uint8_t channel, uint16_t angle_deg)
+esp_err_t servo_driver_set_position(ServoDriver *driver,
+                                    uint8_t channel_index,
+                                    ServoPosition position)
 {
-    ESP_RETURN_ON_FALSE(s_initialized, ESP_ERR_INVALID_STATE, TAG, "driver not initialized");
-    ESP_RETURN_ON_FALSE(channel < s_config.channel_count, ESP_ERR_INVALID_ARG, TAG, "bad channel");
+    if ((driver == NULL) || !driver->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (channel_index >= driver->config.channel_count) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    uint32_t pulse_us = servo_driver_angle_to_pulse_us(angle_deg);
-    uint32_t duty = servo_driver_pulse_us_to_duty(pulse_us);
+    uint32_t pulse_width_us = 0U;
+    ESP_RETURN_ON_ERROR(position_to_pulse_width(&driver->config,
+                                                position,
+                                                &pulse_width_us),
+                        TAG,
+                        "position is invalid");
+    uint32_t duty = pulse_width_to_duty(driver, pulse_width_us);
+    esp_err_t error = bsp_pwm_set_duty(
+        driver->config.speed_mode,
+        driver->config.channels[channel_index].ledc_channel,
+        duty);
+    if (error != ESP_OK) {
+        return error;
+    }
 
-    ESP_RETURN_ON_ERROR(
-        ledc_set_duty(s_config.speed_mode, s_config.channels[channel].ledc_channel, duty),
-        TAG, "set duty failed");
-    ESP_RETURN_ON_ERROR(
-        ledc_update_duty(s_config.speed_mode, s_config.channels[channel].ledc_channel),
-        TAG, "update duty failed");
-
-    ESP_LOGI(TAG, "ch%u %s GPIO%d angle=%u pulse=%" PRIu32 "us duty=%" PRIu32,
-             channel, s_config.channels[channel].name, s_config.channels[channel].gpio,
-             angle_deg, pulse_us, duty);
+    driver->commanded_positions[channel_index] = position;
     return ESP_OK;
 }
 
-esp_err_t servo_driver_set_all_angle(uint16_t angle_deg)
+esp_err_t servo_driver_set_all_positions(ServoDriver *driver,
+                                         ServoPosition position)
 {
-    for (uint8_t i = 0U; i < s_config.channel_count; ++i) {
-        ESP_RETURN_ON_ERROR(servo_driver_set_angle(i, angle_deg), TAG, "set angle failed");
+    if ((driver == NULL) || !driver->initialized) {
+        return ESP_ERR_INVALID_STATE;
     }
+
+    for (uint8_t index = 0U; index < driver->config.channel_count; ++index) {
+        esp_err_t error = servo_driver_set_position(driver, index, position);
+        if (error != ESP_OK) {
+            return error;
+        }
+    }
+    return ESP_OK;
+}
+
+esp_err_t servo_driver_get_commanded_position(const ServoDriver *driver,
+                                              uint8_t channel_index,
+                                              ServoPosition *position)
+{
+    if ((driver == NULL) || !driver->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if ((position == NULL) || (channel_index >= driver->config.channel_count)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *position = driver->commanded_positions[channel_index];
+    return ESP_OK;
+}
+
+esp_err_t servo_driver_deinit(ServoDriver *driver)
+{
+    if ((driver == NULL) || !driver->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t first_error = ESP_OK;
+    for (uint8_t index = 0U; index < driver->config.channel_count; ++index) {
+        esp_err_t error = bsp_pwm_stop(
+            driver->config.speed_mode,
+            driver->config.channels[index].ledc_channel,
+            0U);
+        if ((first_error == ESP_OK) && (error != ESP_OK)) {
+            first_error = error;
+        }
+    }
+
+    esp_err_t timer_error = bsp_pwm_timer_deinit(driver->config.speed_mode,
+                                                 driver->config.timer);
+    if ((first_error == ESP_OK) && (timer_error != ESP_OK)) {
+        first_error = timer_error;
+    }
+
+    *driver = (ServoDriver) {0};
+    return first_error;
+}
+
+esp_err_t servo_driver_position_to_degrees(ServoPosition position,
+                                           uint16_t *degrees)
+{
+    if (degrees == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    switch (position) {
+        case SERVO_POSITION_0_DEG:
+            *degrees = 0U;
+            break;
+        case SERVO_POSITION_45_DEG:
+            *degrees = 45U;
+            break;
+        case SERVO_POSITION_90_DEG:
+            *degrees = 90U;
+            break;
+        case SERVO_POSITION_135_DEG:
+            *degrees = 135U;
+            break;
+        case SERVO_POSITION_180_DEG:
+            *degrees = 180U;
+            break;
+        default:
+            return ESP_ERR_INVALID_ARG;
+    }
+
     return ESP_OK;
 }

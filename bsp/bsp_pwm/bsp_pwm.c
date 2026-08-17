@@ -46,7 +46,25 @@ esp_err_t bsp_pwm_set_duty(ledc_mode_t speed_mode, ledc_channel_t channel, uint3
     return ledc_update_duty(speed_mode, channel);
 }
 
+esp_err_t bsp_pwm_stop(ledc_mode_t speed_mode,
+                       ledc_channel_t channel,
+                       uint32_t idle_level)
+{
+    return ledc_stop(speed_mode, channel, idle_level);
+}
+
+esp_err_t bsp_pwm_timer_deinit(ledc_mode_t speed_mode,
+                              ledc_timer_t timer_num)
+{
+    return ledc_timer_rst(speed_mode, timer_num);
+}
+
 uint32_t bsp_pwm_max_duty(ledc_timer_bit_t duty_resolution)
 {
+    if (((uint32_t)duty_resolution == 0U) ||
+        ((uint32_t)duty_resolution >= 32U)) {
+        return 0U;
+    }
+
     return (1U << duty_resolution) - 1U;
 }
