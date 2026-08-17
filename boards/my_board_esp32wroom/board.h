@@ -90,6 +90,11 @@
 #define BOARD_SPI_CS0_GPIO                   15
 #define BOARD_SPI_CS1_GPIO                   13
 
+/* Native PDM microphone path; GPIO18 is shared with BOARD_SPI_SCK_GPIO. */
+#define BOARD_I2S_PDM_RX_PORT                0
+#define BOARD_I2S_PDM_CLK_GPIO               18
+#define BOARD_I2S_PDM_DATA_GPIO              2
+
 /* CAN transceiver */
 #define BOARD_CAN_TX_GPIO                    5
 #define BOARD_CAN_RX_GPIO                    4

@@ -6,7 +6,6 @@
 
 #include "driver/gpio.h"
 #include "esp_err.h"
-#include "native_pdm_transport.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,7 +32,8 @@ typedef struct {
 } Msm261dgt003DirectPdmConfig;
 
 typedef struct {
-    NativePdmTransport transport;
+    bool initialized;
+    bool running;
 } Msm261dgt003DirectPdm;
 
 esp_err_t msm261dgt003_direct_pdm_config_default(

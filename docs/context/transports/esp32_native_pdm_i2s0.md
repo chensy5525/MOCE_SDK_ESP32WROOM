@@ -4,13 +4,13 @@ purpose: acquire mono PCM from a PDM input through ESP32 I2S0 and DMA
 supported_host_boards:
   - my_board_esp32wroom
 implementation:
-  component: components_direct/native_pdm_transport
+  component: bsp/bsp_i2s
   public_operations:
-    - native_pdm_transport_init
-    - native_pdm_transport_start
-    - native_pdm_transport_read
-    - native_pdm_transport_stop
-    - native_pdm_transport_deinit
+    - bsp_i2s_pdm_rx_init
+    - bsp_i2s_pdm_rx_start
+    - bsp_i2s_pdm_rx_read
+    - bsp_i2s_pdm_rx_stop
+    - bsp_i2s_pdm_rx_deinit
 generic_operations:
   - op: pdm_rx_init
     fields: clk_gpio, data_gpio, sample_rate_hz, downsample, channel, invert_clk

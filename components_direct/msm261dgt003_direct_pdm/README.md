@@ -1,7 +1,7 @@
 # MSM261DGT003 direct PDM driver
 
 This component contains only MSM261DGT003 device semantics and delegates I2S,
-DMA, GPIO, timeout, and channel lifetime to `native_pdm_transport`.
+DMA, GPIO, timeout, and channel lifetime to `bsp_i2s`.
 
 The caller must zero-initialize `Msm261dgt003DirectPdm`, call
 `msm261dgt003_direct_pdm_config_default()`, and then bind the board-specific
@@ -17,3 +17,5 @@ No gain, filtering, volume threshold, VAD, playback, AEC, calibrated SPL, or
 application state machine belongs in this driver. Calls are synchronous and
 not internally serialized; one task or an application-owned mutex must own an
 instance.
+
+Minimal example: `examples_direct/msm261dgt003_direct_pdm_test`.

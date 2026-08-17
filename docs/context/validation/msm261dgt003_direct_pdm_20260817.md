@@ -12,19 +12,28 @@ supported_boards:
   - my_board_esp32wroom
 source_paths:
   components:
-    - components_direct/native_pdm_transport
+    - bsp/bsp_i2s
     - components_direct/msm261dgt003_direct_pdm
-  examples: []
+  examples:
+    - examples_direct/msm261dgt003_direct_pdm_test
   docs:
     - docs/context/devices/msm261dgt003.md
     - docs/context/transports/esp32_native_pdm_i2s0.md
+    - docs/context/recipes/msm261dgt003_direct_pdm_test.md
 build:
-  command: CMake configure followed by Ninja component-object and static-library targets in an ignored temporary project
+  command: idf.py -C examples_direct/msm261dgt003_direct_pdm_test build
   status: compile_passed
-  scope: native_pdm_transport, msm261dgt003_direct_pdm, and public-API caller objects plus static libraries
-  full_application_link: untested
+  scope: full example configure, compile, link, binary generation, and size check after BSP split
+  full_application_link: passed
   compiler_flags: ESP-IDF defaults including -Wall and -Werror
   toolchain: ESP-IDF 6.0.2, xtensa-esp-elf GCC 15.2.0; repository submodule unavailable
+  image_size_bytes: 161472
+  app_partition_size_bytes: 1048576
+  app_partition_free_percent: 85
+  iram_used_bytes: 46171
+  iram_used_percent: 35.23
+  dram_used_bytes: 14472
+  dram_used_percent: 8.01
   last_verified: 2026-08-17
 hardware_tests:
   bench_status: untested
@@ -45,11 +54,10 @@ failure_behavior:
   - invalid pins, rates, channels, buffers, or timeouts return an error
   - transport initialization failure attempts to release the allocated I2S channel before returning the initialization error
 known_limits:
-  - no minimal example is included in this driver-only task
-  - only component objects and static libraries were built; no application image was linked
+  - the minimal example has not been flashed or run on hardware
   - the L/R switch level must be measured and matched by configuration
   - GPIO2 boot behavior and GPIO18 SPI conflict are not board-validated here
-  - no compile, flash, waveform, audio-quality, or long-duration claim is inherited from the standalone prototype
+  - no flash, waveform, audio-quality, or long-duration claim is inherited from the standalone prototype
 must_not_claim:
   - board-passed status for these repository files
   - calibrated SPL, VAD, playback, AEC, or production audio readiness

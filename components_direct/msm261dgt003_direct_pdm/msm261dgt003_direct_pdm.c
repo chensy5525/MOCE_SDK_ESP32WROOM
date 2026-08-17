@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 
+#include "bsp_i2s.h"
 #include "esp_log.h"
 
 #define MSM261DGT003_DIRECT_PDM_DOWNSAMPLE_64  64U
@@ -39,14 +40,14 @@ static bool config_is_valid(const Msm261dgt003DirectPdmConfig *config)
     return channel_is_valid(config->channel);
 }
 
-static NativePdmTransportDownsample select_downsample(
+static bsp_i2s_pdm_downsample_t select_downsample(
     uint32_t sample_rate_hz)
 {
     uint32_t clock_hz =
         sample_rate_hz * MSM261DGT003_DIRECT_PDM_DOWNSAMPLE_64;
     return (clock_hz < MSM261DGT003_DIRECT_PDM_STANDARD_CLK_MIN_HZ)
-               ? NATIVE_PDM_TRANSPORT_DOWNSAMPLE_128
-               : NATIVE_PDM_TRANSPORT_DOWNSAMPLE_64;
+               ? BSP_I2S_PDM_DOWNSAMPLE_128
+               : BSP_I2S_PDM_DOWNSAMPLE_64;
 }
 
 esp_err_t msm261dgt003_direct_pdm_config_default(
@@ -75,7 +76,11 @@ esp_err_t msm261dgt003_direct_pdm_init(
         return ESP_ERR_INVALID_ARG;
     }
 
-    NativePdmTransportDownsample downsample =
+    if (device->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bsp_i2s_pdm_downsample_t downsample =
         select_downsample(config->sample_rate_hz);
     uint32_t pdm_clock_hz =
         config->sample_rate_hz * (uint32_t)downsample;
@@ -84,23 +89,25 @@ esp_err_t msm261dgt003_direct_pdm_init(
         return ESP_ERR_INVALID_ARG;
     }
 
-    NativePdmTransportConfig transport_config = {
+    bsp_i2s_pdm_rx_config_t i2s_config = {
         .clk_gpio = config->clk_gpio,
         .data_gpio = config->data_gpio,
         .sample_rate_hz = config->sample_rate_hz,
         .downsample = downsample,
-        .channel =
+        .slot =
             (config->channel == MSM261DGT003_DIRECT_PDM_SELECT_HIGH)
-                ? NATIVE_PDM_TRANSPORT_SELECT_HIGH
-                : NATIVE_PDM_TRANSPORT_SELECT_LOW,
+                ? BSP_I2S_PDM_SLOT_RIGHT
+                : BSP_I2S_PDM_SLOT_LEFT,
         .invert_clk = config->invert_clk,
     };
 
-    esp_err_t error =
-        native_pdm_transport_init(&device->transport, &transport_config);
+    esp_err_t error = bsp_i2s_pdm_rx_init(&i2s_config);
     if (error != ESP_OK) {
         return error;
     }
+
+    device->initialized = true;
+    device->running = false;
 
     ESP_LOGI(TAG,
              "PCM=%" PRIu32 " Hz, PDM CLK=%" PRIu32 " Hz, DSR=%u",
@@ -112,9 +119,18 @@ esp_err_t msm261dgt003_direct_pdm_init(
 
 esp_err_t msm261dgt003_direct_pdm_start(Msm261dgt003DirectPdm *device)
 {
-    return (device == NULL)
-               ? ESP_ERR_INVALID_ARG
-               : native_pdm_transport_start(&device->transport);
+    if (device == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!device->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t error = bsp_i2s_pdm_rx_start();
+    if (error == ESP_OK) {
+        device->running = true;
+    }
+    return error;
 }
 
 esp_err_t msm261dgt003_direct_pdm_read(Msm261dgt003DirectPdm *device,
@@ -123,25 +139,46 @@ esp_err_t msm261dgt003_direct_pdm_read(Msm261dgt003DirectPdm *device,
                                        size_t *samples_read,
                                        uint32_t timeout_ms)
 {
-    return (device == NULL)
-               ? ESP_ERR_INVALID_ARG
-               : native_pdm_transport_read(&device->transport,
-                                           samples,
-                                           sample_capacity,
-                                           samples_read,
-                                           timeout_ms);
+    if (device == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!device->initialized || !device->running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return bsp_i2s_pdm_rx_read(samples,
+                               sample_capacity,
+                               samples_read,
+                               timeout_ms);
 }
 
 esp_err_t msm261dgt003_direct_pdm_stop(Msm261dgt003DirectPdm *device)
 {
-    return (device == NULL)
-               ? ESP_ERR_INVALID_ARG
-               : native_pdm_transport_stop(&device->transport);
+    if (device == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!device->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t error = bsp_i2s_pdm_rx_stop();
+    if (error == ESP_OK) {
+        device->running = false;
+    }
+    return error;
 }
 
 esp_err_t msm261dgt003_direct_pdm_deinit(Msm261dgt003DirectPdm *device)
 {
-    return (device == NULL)
-               ? ESP_ERR_INVALID_ARG
-               : native_pdm_transport_deinit(&device->transport);
+    if (device == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!device->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t error = bsp_i2s_pdm_rx_deinit();
+    if (error == ESP_OK) {
+        *device = (Msm261dgt003DirectPdm) {0};
+    }
+    return error;
 }
