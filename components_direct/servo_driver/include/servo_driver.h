@@ -76,7 +76,9 @@ esp_err_t servo_driver_set_position(ServoDriver *driver,
 
 /**
  * Apply a position sequentially to every channel.
- * A hardware failure can leave earlier channels updated and later channels unchanged.
+ * If any update fails, restore every channel to initial_position. If that
+ * recovery also fails, stop all configured PWM outputs; an incomplete shutdown
+ * leaves the handle in cleanup-required state.
  */
 esp_err_t servo_driver_set_all_positions(ServoDriver *driver,
                                          ServoPosition position);

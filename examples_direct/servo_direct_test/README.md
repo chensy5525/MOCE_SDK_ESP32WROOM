@@ -1,12 +1,13 @@
 # servo_direct_test
 
-Finite MG90S direct-PWM validation recipe for the ESP32-WROOM board.
+Finite dual-MG90S direct-PWM validation recipe for the ESP32-WROOM board.
 
 ## Frozen binding
 
 - Board: ESP32-WROOM-32E-N4 main controller V1.0.
-- Signal: `PWM1` / GPIO32.
-- LEDC: high-speed mode, timer 1, channel 1, 16-bit resolution.
+- Servo 1 signal: `PWM1` / GPIO32 / LEDC high-speed timer 1 channel 1.
+- Servo 2 signal: `PWM2` / GPIO33 / LEDC high-speed timer 1 channel 2.
+- Both channels use the shared 50 Hz timer at 16-bit resolution.
 - PWM: 50 Hz.
 - Pulse targets: 1000, 1250, 1500, 1750, and 2000 us.
 
@@ -16,19 +17,22 @@ The sequence is:
 0 -> 45 -> 90 -> 135 -> 180 -> 135 -> 90
 ```
 
-Every command is held for 3 seconds. The task then exits and leaves the final
-90-degree PWM command active; it does not cycle forever and does not use serial
-input to control the servo.
+Both channels receive every command. Each command is held for 3 seconds. The
+task then exits and leaves both final 90-degree PWM commands active; it does not
+cycle forever and does not use serial input to control either servo.
 
-If a command fails, the recipe first attempts the defined safe state (the
-nominal 90-degree command). If that command also fails, it stops the PWM output.
+If either channel command fails, the driver addresses the pair as one safety
+group: it first restores both channels to the nominal 90-degree command. If
+that recovery fails, it stops both PWM outputs. Initialization failure also
+rolls back the whole pair; incomplete shutdown remains explicit in the log.
 
 ## Wiring and safety
 
-- Connect the servo signal to GPIO32.
-- Use an approved 5 V servo supply and connect its ground to ESP32 ground.
-- Do not power the servo from the ESP32 3.3 V rail.
-- Disconnect servo power on chatter, end-stop stall, overheating, or supply
+- Connect servo 1 signal to PWM1/GPIO32 and servo 2 signal to PWM2/GPIO33.
+- Use a servo supply approved for the combined load and connect its ground to
+  ESP32 ground; the current capability has not been validated by this task.
+- Do not power either servo from the ESP32 3.3 V rail.
+- Disconnect both servos' power on chatter, end-stop stall, overheating, or supply
   collapse.
 
 ## Build
@@ -39,8 +43,8 @@ nominal 90-degree command). If that command also fails, it stops the PWM output.
 
 ## Validation boundary
 
-The earlier standalone implementation was accepted by the user on hardware on
-2026-08-17 with the same GPIO, frequency, pulse targets, and finite sequence.
-This refactored BSP-based implementation requires a new hardware regression
-before it can be called board-passed. Serial logs prove command execution only;
-they do not prove PWM waveform or mechanical angle accuracy.
+The earlier standalone evidence covers only one servo on PWM1/GPIO32 and does
+not validate this dual-channel source. The current dual-channel implementation
+is hardware-untested and requires a new regression before it can be called
+board-passed. Serial logs prove command execution only; they do not prove both
+PWM waveforms, supply integrity, or mechanical angle accuracy.

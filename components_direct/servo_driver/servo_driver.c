@@ -180,6 +180,18 @@ static uint32_t pulse_width_to_duty(const ServoDriver *driver,
                       driver->pwm_period_us);
 }
 
+static esp_err_t apply_position_to_all_channels(ServoDriver *driver,
+                                                ServoPosition position)
+{
+    for (uint8_t index = 0U; index < driver->config.channel_count; ++index) {
+        esp_err_t error = servo_driver_set_position(driver, index, position);
+        if (error != ESP_OK) {
+            return error;
+        }
+    }
+    return ESP_OK;
+}
+
 esp_err_t servo_driver_config_default(ServoDriverConfig *config)
 {
     if (config == NULL) {
@@ -238,7 +250,6 @@ esp_err_t servo_driver_init(ServoDriver *driver,
                         TAG,
                         "PWM timer initialization failed");
 
-    uint8_t initialized_channels = 0U;
     for (uint8_t index = 0U; index < config->channel_count; ++index) {
         bsp_pwm_channel_config_t channel_config = {
             .gpio_num = config->channels[index].gpio,
@@ -251,8 +262,11 @@ esp_err_t servo_driver_init(ServoDriver *driver,
         if (error != ESP_OK) {
             esp_err_t rollback_error = release_pwm_resources(
                 config,
-                initialized_channels);
+                config->channel_count);
             if (rollback_error != ESP_OK) {
+                candidate.initialized = false;
+                candidate.cleanup_required = true;
+                *driver = candidate;
                 ESP_LOGE(TAG,
                          "PWM initialization rollback incomplete: %s",
                          esp_err_to_name(rollback_error));
@@ -265,7 +279,6 @@ esp_err_t servo_driver_init(ServoDriver *driver,
         }
 
         candidate.commanded_positions[index] = config->initial_position;
-        ++initialized_channels;
     }
 
     candidate.initialized = true;
@@ -315,14 +328,36 @@ esp_err_t servo_driver_set_all_positions(ServoDriver *driver,
     if (!driver->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
-
-    for (uint8_t index = 0U; index < driver->config.channel_count; ++index) {
-        esp_err_t error = servo_driver_set_position(driver, index, position);
-        if (error != ESP_OK) {
-            return error;
-        }
+    if (!position_is_valid(position)) {
+        return ESP_ERR_INVALID_ARG;
     }
-    return ESP_OK;
+
+    esp_err_t command_error = apply_position_to_all_channels(driver, position);
+    if (command_error == ESP_OK) {
+        return ESP_OK;
+    }
+
+    ESP_LOGE(TAG,
+             "coordinated command failed: %s; restoring all channels to the initial position",
+             esp_err_to_name(command_error));
+    esp_err_t safe_error = apply_position_to_all_channels(
+        driver,
+        driver->config.initial_position);
+    if (safe_error == ESP_OK) {
+        ESP_LOGW(TAG, "all channels restored to the initial position");
+        return command_error;
+    }
+
+    ESP_LOGE(TAG,
+             "safe-position recovery failed: %s; stopping all PWM outputs",
+             esp_err_to_name(safe_error));
+    esp_err_t shutdown_error = servo_driver_deinit(driver);
+    if (shutdown_error != ESP_OK) {
+        ESP_LOGE(TAG,
+                 "PWM shutdown incomplete: %s; cleanup retry required",
+                 esp_err_to_name(shutdown_error));
+    }
+    return command_error;
 }
 
 esp_err_t servo_driver_get_commanded_position(const ServoDriver *driver,

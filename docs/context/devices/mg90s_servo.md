@@ -27,8 +27,8 @@ abstract_host_operations_required:
   - pwm_set
 safe_defaults:
   - initialize with the nominal 90-degree pulse
-  - recipe failure should request the nominal 90-degree command
-  - disable PWM if the safe-position command cannot be applied
+  - a multi-servo recipe failure should request the nominal 90-degree command for every selected instance
+  - disable every selected PWM output if the group safe-position command cannot be applied
 user_phrases:
   - switch the servo angle in 45-degree steps
   - move the MG90S to a fixed position
@@ -36,5 +36,5 @@ forbidden_contamination:
   - motor speed-control semantics
   - continuous-rotation claims
   - serial-control requirements
-validation_status: hardware_baseline_only
+validation_status: compile_passed
 ## END_MOCE_DEVICE_CONTEXT
