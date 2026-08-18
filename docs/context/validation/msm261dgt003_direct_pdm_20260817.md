@@ -1,6 +1,6 @@
 ## MOCE_VALIDATION_CONTEXT
 validation_id: msm261dgt003_direct_pdm_20260817
-scope: device
+scope: integration
 related_contracts:
   bridge_contexts: []
   transport_contexts:
@@ -37,9 +37,9 @@ build:
   dram_used_percent: 8.01
   last_verified: 2026-08-18
 hardware_tests:
-  bench_status: partial
+  bench_status: passed
   board_status: passed
-  integrated_status: partial
+  integrated_status: passed
   tested_node_count: 1
   dynamic_node_assignment: not_applicable
   target: ESP32-D0WD-V3 revision 3.1 on CH340 COM6
@@ -51,8 +51,11 @@ hardware_tests:
   observed_runtime:
     - continuous 512-sample blocks with no read error or reset during bounded captures
     - one log every 32 blocks arrived about every 370 ms, matching the configured sample rate
-    - ambient peak was approximately 1083-1309 and mean_abs approximately 1016-1203
-  acoustic_stimulus_result: inconclusive; a two-second host WAV stimulus did not produce a sustained level increase
+    - ambient peak immediately around the user stimulus was approximately 1100-1254
+    - the first user clap produced peak=8143 at 440165 ms
+    - the second user clap produced peak=1888 and peak=1829 at 443135 ms and 443505 ms
+    - the two principal clap responses began approximately 2.97 seconds apart
+  acoustic_stimulus_result: passed; two user-generated claps produced repeatable PCM peak changes above the surrounding ambient level
   evidence:
     - raw_log: build/log/mic_bench_20260818.bin
       bytes: 2400
@@ -60,6 +63,10 @@ hardware_tests:
     - raw_log: build/log/mic_wav_20260818.bin
       bytes: 1656
       sha256: 464E711D24AA452E174C73DF06DC9247530D3F767EA1A068C2C4321E560D9941
+    - external_raw_log: C:/Users/LENOVO/AppData/Local/Temp/mic_two_claps_retry_20260818.bin
+      bytes: 4158
+      sha256: CDF34949457619C6F582DC81B80F3CEDAE7E290D263ACE061C67E5F9385D1AE0
+      capture_scope: bounded serial capture containing both user clap responses
 prior_baseline_evidence:
   implementation: pre-rename standalone MSM261DGT003 PDM implementation
   date: 2026-08-15
@@ -78,14 +85,15 @@ failure_behavior:
 known_limits:
   - the physical L/R switch level was not measured; current firmware selects the low/left slot
   - GPIO2 cold boot passed on the tested board, but GPIO18 remains exclusive with SPI SCK while I2S is active
+  - the example reports only every 32nd 512-sample block, so short transients may be partially sampled and clap peak magnitudes are not directly comparable
   - acoustic sensitivity, audio quality, waveform fidelity, and long-duration stability remain unverified
 must_not_claim:
-  - acoustically verified microphone response or full integrated pass
-  - calibrated SPL, VAD, playback, AEC, or production audio readiness
+  - calibrated SPL, calibrated sensitivity, audio-quality, or waveform-fidelity performance
+  - VAD, playback, AEC, production audio readiness, or long-duration stability
 app_consumption:
   can_use_for_component_selection: true
   can_use_for_resource_planning: true
-  can_use_for_hardware_build: false
-  can_use_for_firmware_generation: false
-approval_status: blocked
+  can_use_for_hardware_build: true
+  can_use_for_firmware_generation: true
+approval_status: ready_for_app
 ## END_MOCE_VALIDATION_CONTEXT

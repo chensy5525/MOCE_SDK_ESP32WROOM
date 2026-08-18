@@ -38,5 +38,5 @@ transport_responsibilities:
 must_not_include:
   - microphone-specific gain or volume policy
   - product audio state machines
-validation_status: compile_passed
+validation_status: board_passed
 ## END_MOCE_TRANSPORT_CONTEXT

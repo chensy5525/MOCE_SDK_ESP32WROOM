@@ -36,5 +36,5 @@ failure_behavior:
 must_not_include:
   - calibrated SPL, VAD, recording storage, playback, or product audio policy
 compile_command: .\tools\build.ps1 examples_direct/msm261dgt003_direct_pdm_test esp32 my_board_esp32wroom
-hardware_test_status: partial
+hardware_test_status: integrated_passed
 ## END_MOCE_RECIPE_CONTEXT
