@@ -28,6 +28,9 @@ The public command set is limited to five nominal positions:
 
 PWM frequency is fixed at 50 Hz. Pulse widths are configurable because real
 mechanical angle depends on the servo, supply, load, linkage, and calibration.
+The driver accepts only the conservative 1000 us to 2000 us command envelope;
+values outside that envelope are rejected before LEDC is configured. This is a
+software guardrail, not calibrated angle or stall-current evidence.
 `servo_driver_get_commanded_position()` returns the last accepted command; it is
 not position feedback.
 
@@ -45,6 +48,11 @@ Initialization starts every configured channel at the nominal 90-degree pulse.
 If one channel fails to initialize, earlier channels are stopped and the timer
 is released. A multi-channel command can partially succeed; callers requiring
 coordinated motion must handle that explicitly.
+
+If output shutdown or timer release fails, the handle enters cleanup-required
+state. Motion commands are rejected and `servo_driver_deinit()` can be called
+again. Calls that share one handle must be serialized by the caller; this
+component does not allocate an internal mutex.
 
 All public functions return `esp_err_t`, including nominal-degree conversion.
 No sentinel value is used to hide an invalid position. The driver does not

@@ -18,6 +18,8 @@ extern "C" {
 #define SERVO_DRIVER_DEFAULT_90_PULSE_US   1500U
 #define SERVO_DRIVER_DEFAULT_135_PULSE_US  1750U
 #define SERVO_DRIVER_DEFAULT_180_PULSE_US  2000U
+#define SERVO_DRIVER_MIN_PULSE_US          1000U
+#define SERVO_DRIVER_MAX_PULSE_US          2000U
 #define SERVO_DRIVER_INITIALIZER            {0}
 
 typedef enum {
@@ -54,9 +56,10 @@ typedef struct {
     uint32_t pwm_period_us;
     uint32_t max_duty;
     bool initialized;
+    bool cleanup_required;
 } ServoDriver;
 
-/** Populate a configuration with MG90S-safe nominal defaults and no bindings. */
+/** Populate conservative MG90S nominal defaults with no resource bindings. */
 esp_err_t servo_driver_config_default(ServoDriverConfig *config);
 
 /**
@@ -83,7 +86,10 @@ esp_err_t servo_driver_get_commanded_position(const ServoDriver *driver,
                                               uint8_t channel_index,
                                               ServoPosition *position);
 
-/** Stop configured outputs, release the PWM timer, and invalidate the handle. */
+/**
+ * Stop configured outputs and release the PWM timer.
+ * On failure the handle rejects commands and remains valid for a cleanup retry.
+ */
 esp_err_t servo_driver_deinit(ServoDriver *driver);
 
 /** Convert a supported position token to its nominal degree label. */
