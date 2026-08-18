@@ -39,6 +39,21 @@ static const char *TAG = "bsp_uart";
 
 static bool s_initialized;
 static uart_port_t s_port = BOARD_UART_PORT;
+static bsp_uart_config_t s_active_config;
+
+static bool bsp_uart_config_is_equal(const bsp_uart_config_t *left,
+                                     const bsp_uart_config_t *right)
+{
+    return left->port == right->port &&
+           left->tx_gpio == right->tx_gpio &&
+           left->rx_gpio == right->rx_gpio &&
+           left->rts_gpio == right->rts_gpio &&
+           left->cts_gpio == right->cts_gpio &&
+           left->baud_rate == right->baud_rate &&
+           left->rx_buffer_size == right->rx_buffer_size &&
+           left->tx_buffer_size == right->tx_buffer_size &&
+           left->event_queue_size == right->event_queue_size;
+}
 
 void bsp_uart_get_default_config(bsp_uart_config_t *config)
 {
@@ -66,9 +81,10 @@ esp_err_t bsp_uart_init(const bsp_uart_config_t *config)
     ESP_RETURN_ON_FALSE(config->rx_buffer_size > 0, ESP_ERR_INVALID_ARG, TAG, "rx buffer is too small");
 
     if (s_initialized) {
-        if (s_port == config->port) {
+        if (bsp_uart_config_is_equal(&s_active_config, config)) {
             return ESP_OK;
         }
+        ESP_LOGE(TAG, "UART is already initialized with a different configuration");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -100,6 +116,7 @@ esp_err_t bsp_uart_init(const bsp_uart_config_t *config)
                         "uart_driver_install failed");
 
     s_port = config->port;
+    s_active_config = *config;
     s_initialized = true;
     ESP_LOGI(TAG, "UART%d initialized: TX GPIO %d, RX GPIO %d, baud %d",
              s_port,
@@ -124,6 +141,7 @@ esp_err_t bsp_uart_deinit(void)
 
     ESP_RETURN_ON_ERROR(uart_driver_delete(s_port), TAG, "uart_driver_delete failed");
     s_initialized = false;
+    memset(&s_active_config, 0, sizeof(s_active_config));
     return ESP_OK;
 }
 
