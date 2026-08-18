@@ -35,13 +35,31 @@ build:
   iram_used_percent: 35.23
   dram_used_bytes: 14472
   dram_used_percent: 8.01
-  last_verified: 2026-08-17
+  last_verified: 2026-08-18
 hardware_tests:
-  bench_status: untested
-  board_status: untested
-  integrated_status: untested
-  tested_node_count: 0
+  bench_status: partial
+  board_status: passed
+  integrated_status: partial
+  tested_node_count: 1
   dynamic_node_assignment: not_applicable
+  target: ESP32-D0WD-V3 revision 3.1 on CH340 COM6
+  flash_result: bootloader, partition table, and app hashes verified by esptool 5.3.1
+  reset_result: POWERON_RESET followed by normal SPI_FAST_FLASH_BOOT
+  observed_initialization:
+    - I2S0 PDM RX initialized on CLK GPIO18 and DATA GPIO2
+    - PCM 44100 Hz, PDM clock 2822400 Hz, DSR 64
+  observed_runtime:
+    - continuous 512-sample blocks with no read error or reset during bounded captures
+    - one log every 32 blocks arrived about every 370 ms, matching the configured sample rate
+    - ambient peak was approximately 1083-1309 and mean_abs approximately 1016-1203
+  acoustic_stimulus_result: inconclusive; a two-second host WAV stimulus did not produce a sustained level increase
+  evidence:
+    - raw_log: build/log/mic_bench_20260818.bin
+      bytes: 2400
+      sha256: 4FFC979CEFF003883B8D137BC7A30BFFE8B936A84DF797581014E88F4895980E
+    - raw_log: build/log/mic_wav_20260818.bin
+      bytes: 1656
+      sha256: 464E711D24AA452E174C73DF06DC9247530D3F767EA1A068C2C4321E560D9941
 prior_baseline_evidence:
   implementation: pre-rename standalone MSM261DGT003 PDM implementation
   date: 2026-08-15
@@ -58,12 +76,11 @@ failure_behavior:
   - invalid pins, rates, channels, buffers, or timeouts return an error
   - transport initialization failure attempts to release the allocated I2S channel before returning the initialization error
 known_limits:
-  - the minimal example has not been flashed or run on hardware
-  - the L/R switch level must be measured and matched by configuration
-  - GPIO2 boot behavior and GPIO18 SPI conflict are not board-validated here
-  - no flash, waveform, audio-quality, or long-duration claim is inherited from the standalone prototype
+  - the physical L/R switch level was not measured; current firmware selects the low/left slot
+  - GPIO2 cold boot passed on the tested board, but GPIO18 remains exclusive with SPI SCK while I2S is active
+  - acoustic sensitivity, audio quality, waveform fidelity, and long-duration stability remain unverified
 must_not_claim:
-  - board-passed status for these repository files
+  - acoustically verified microphone response or full integrated pass
   - calibrated SPL, VAD, playback, AEC, or production audio readiness
 app_consumption:
   can_use_for_component_selection: true
