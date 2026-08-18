@@ -9,13 +9,13 @@
  * Pin map follows the schematic labels:
  * - TXD0/RXD0 are reserved for programming/log serial.
  * - TXD1/RXD1 are routed to the external serial header.
- * - GPIO21/GPIO22 are the I2C0 bus.
- * - GPIO23/19/18/15/13 are the SPI bus.
+ * - GPIO21/GPIO23 are the I2C0 bus.
+ * - GPIO23/19/18/15/13 are the SPI bus; GPIO23 is a shared resource.
  * - GPIO5/GPIO4 are the CAN transceiver TX/RX signals.
  */
 
 /* On-board controllable LED */
-#define BOARD_LED_GPIO               12
+#define BOARD_LED_GPIO               22
 
 #define BOARD_LED_PWM_MODE           LEDC_HIGH_SPEED_MODE
 #define BOARD_LED_PWM_TIMER          LEDC_TIMER_0
@@ -66,7 +66,7 @@
 
 #define BOARD_I2C_PORT                       I2C_NUM_0
 #define BOARD_I2C_SDA_GPIO                   21
-#define BOARD_I2C_SCL_GPIO                   22
+#define BOARD_I2C_SCL_GPIO                   23
 #define BOARD_I2C_FREQUENCY_HZ               400000
 #define BOARD_I2C_TIMEOUT_MS                 1000
 #define BOARD_I2C_GLITCH_IGNORE_CNT          7
@@ -108,20 +108,19 @@
  * TB6612 Motor Driver
  * =========================
  *
- * This ESP32-WROOM schematic does not include a dedicated TB6612 circuit.
- * These defaults map the SDK motor BSP onto available output-capable header
- * pins so motor examples can still be wired externally.
+ * These bindings follow the adapter schematic TB6612 nets. STBY is not
+ * software-controlled by this board profile and must be verified separately.
  */
 
 /* Left motor */
-#define BOARD_MOTOR_LEFT_PWM_GPIO        BOARD_PWM_B1_GPIO
-#define BOARD_MOTOR_LEFT_IN1_GPIO        BOARD_PWM_B2_GPIO
-#define BOARD_MOTOR_LEFT_IN2_GPIO        BOARD_PWM_B3_GPIO
+#define BOARD_MOTOR_LEFT_PWM_GPIO        25  /* PWMA */
+#define BOARD_MOTOR_LEFT_IN1_GPIO        27  /* AIN1 */
+#define BOARD_MOTOR_LEFT_IN2_GPIO        14  /* AIN2 */
 
 /* Right motor */
-#define BOARD_MOTOR_RIGHT_PWM_GPIO       BOARD_PWM_B4_GPIO
-#define BOARD_MOTOR_RIGHT_IN1_GPIO       BOARD_GPIO_IO27
-#define BOARD_MOTOR_RIGHT_IN2_GPIO       BOARD_GPIO_IO14
+#define BOARD_MOTOR_RIGHT_PWM_GPIO       26  /* PWMB */
+#define BOARD_MOTOR_RIGHT_IN1_GPIO       12  /* BIN1 */
+#define BOARD_MOTOR_RIGHT_IN2_GPIO       13  /* BIN2 */
 
 /* Motor PWM */
 #define BOARD_MOTOR_PWM_MODE             LEDC_HIGH_SPEED_MODE
@@ -130,8 +129,8 @@
 #define BOARD_MOTOR_LEFT_PWM_CHANNEL     LEDC_CHANNEL_3
 #define BOARD_MOTOR_RIGHT_PWM_CHANNEL    LEDC_CHANNEL_4
 
-#define BOARD_MOTOR_PWM_DUTY_RES         LEDC_TIMER_10_BIT
-#define BOARD_MOTOR_PWM_FREQUENCY_HZ     20000
+#define BOARD_MOTOR_PWM_DUTY_RES         LEDC_TIMER_12_BIT
+#define BOARD_MOTOR_PWM_FREQUENCY_HZ     10000
 
 /* =========================
  * Encoder
