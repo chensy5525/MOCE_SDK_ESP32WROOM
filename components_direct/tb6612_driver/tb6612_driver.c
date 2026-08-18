@@ -289,7 +289,7 @@ esp_err_t tb6612_driver_config_default(Tb6612DriverConfig *config)
                 .pwm_channel = LEDC_CHANNEL_1,
             },
         },
-        .control_stby = false,
+        .control_stby = true,
         .stby_gpio = GPIO_NUM_NC,
         .stby_active_high = true,
     };

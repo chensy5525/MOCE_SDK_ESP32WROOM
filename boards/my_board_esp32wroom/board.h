@@ -102,8 +102,12 @@
  * TB6612 Motor Driver
  * =========================
  *
- * These bindings follow the adapter schematic TB6612 nets. STBY is not
- * software-controlled by this board profile and must be verified separately.
+ * These six bindings are backed by the ESP32 main-board, adapter-board, and
+ * TB6612 module schematics. TB6612 U1 pin 19 (STBY) is left unconnected on the
+ * module schematic and is not routed through the 8-pin connector. There is no
+ * BOARD_MOTOR_STBY_GPIO because the hardware provides no such resource. Motor
+ * operation is blocked until the hardware supplies a deterministic STBY-high
+ * level; firmware must not invent a GPIO binding for it.
  */
 
 /* Left motor */

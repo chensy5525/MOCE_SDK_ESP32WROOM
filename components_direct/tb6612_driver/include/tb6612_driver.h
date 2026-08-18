@@ -52,12 +52,18 @@ typedef struct {
     bool initialized;
 } Tb6612Driver;
 
-/** Populate transport defaults without assigning board GPIO resources. */
+/**
+ * Populate transport defaults without assigning board GPIO resources.
+ * STBY control defaults to required, so initialization fails until the caller
+ * binds a valid STBY GPIO or explicitly selects externally enabled hardware.
+ */
 esp_err_t tb6612_driver_config_default(Tb6612DriverConfig *config);
 
 /**
  * Initialize a TB6612 handle in the stopped state.
  * The caller must first initialize the handle with TB6612_DRIVER_INITIALIZER.
+ * Setting control_stby=false is valid only when the schematic proves that STBY
+ * is held active independently of firmware.
  */
 esp_err_t tb6612_driver_init(Tb6612Driver *driver,
                              const Tb6612DriverConfig *config);

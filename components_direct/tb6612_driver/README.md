@@ -23,8 +23,12 @@ the same driver.
 - With controlled STBY, GPIOs are released only after STBY is driven inactive.
 - With external STBY, all PWM and direction pins remain GPIO outputs driven
   low; they are deliberately not released into a potentially floating state.
-- If `control_stby` is false, the application must prove that the external
-  TB6612 `STBY` pin is held active. The driver cannot detect that wiring.
+- STBY control is required by default. `tb6612_driver_config_default()` leaves
+  `control_stby=true` and `stby_gpio=GPIO_NUM_NC`, so initialization cannot
+  succeed until the caller binds a real STBY GPIO.
+- Setting `control_stby=false` is an explicit opt-out for a different board
+  whose schematic proves that STBY is held active independently of firmware.
+  The driver cannot detect that wiring.
 
 Initialize every handle with `TB6612_DRIVER_INITIALIZER` before calling
 `tb6612_driver_init()`.
