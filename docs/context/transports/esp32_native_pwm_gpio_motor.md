@@ -12,9 +12,9 @@ generic_operations:
   - op: gpio_set
     fields: pin, level
 source_evidence:
-  - C:\Users\LENOVO\Desktop\原理图\通用新版\SCH_ESP32-WROOM-32_2026-08-14.pdf
-  - C:\Users\LENOVO\Desktop\原理图\通用新版\SCH_ESP32转接板新版_2026-08-14.pdf
-  - C:\Users\LENOVO\Desktop\原理图\直流无刷电机TB6612\SCH_直流有刷电机-TB6612_2026-08-14.pdf
+  - C:\Users\LENOVO\Desktop\第一批模块资料（新）\ESP32\SCH_ESP32-WROOM-32_2026-08-17.pdf
+  - C:\Users\LENOVO\Desktop\第一批模块资料（新）\ESP32转接板新版\SCH_ESP32转接板新版_2026-08-17.pdf
+  - C:\Users\LENOVO\Desktop\第一批模块资料（新）\直流有刷电机-TB6612\SCH_直流有刷电机-TB6612_2026-08-17.pdf
 resource_bindings:
   - binding_id: tb6612_board_v1
     pwm_a_gpio: 25
@@ -50,5 +50,5 @@ must_not_include:
   - product motion policy
   - claims of motor speed or movement feedback
 hardware_validation_status: blocked_by_unconnected_stby
-validation_status: compile_passed_hardware_blocked
+validation_status: compile_passed
 ## END_MOCE_TRANSPORT_CONTEXT

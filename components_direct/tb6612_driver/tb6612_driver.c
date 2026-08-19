@@ -302,7 +302,7 @@ esp_err_t tb6612_driver_init(Tb6612Driver *driver,
     if (driver == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (driver->initialized) {
+    if (driver->initialized || driver->cleanup_required) {
         return ESP_ERR_INVALID_STATE;
     }
     ESP_RETURN_ON_ERROR(validate_config(config), TAG, "invalid configuration");
@@ -399,7 +399,10 @@ esp_err_t tb6612_driver_set_output(Tb6612Driver *driver,
                                    Tb6612Direction direction,
                                    uint8_t duty_percent)
 {
-    if ((driver == NULL) || !driver->initialized) {
+    if (driver == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!driver->initialized || driver->cleanup_required) {
         return ESP_ERR_INVALID_STATE;
     }
     if (!motor_is_valid(motor) || !direction_is_valid(direction) ||
@@ -455,7 +458,10 @@ esp_err_t tb6612_driver_stop(Tb6612Driver *driver, Tb6612Motor motor)
 
 esp_err_t tb6612_driver_stop_all(Tb6612Driver *driver)
 {
-    if ((driver == NULL) || !driver->initialized) {
+    if (driver == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!driver->initialized || driver->cleanup_required) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -473,11 +479,13 @@ esp_err_t tb6612_driver_get_commanded_output(
     Tb6612Direction *direction,
     uint8_t *duty_percent)
 {
-    if ((driver == NULL) || !driver->initialized) {
+    if ((driver == NULL) || (direction == NULL) || (duty_percent == NULL)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!driver->initialized || driver->cleanup_required) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (!motor_is_valid(motor) || (direction == NULL) ||
-        (duty_percent == NULL)) {
+    if (!motor_is_valid(motor)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -488,11 +496,17 @@ esp_err_t tb6612_driver_get_commanded_output(
 
 esp_err_t tb6612_driver_deinit(Tb6612Driver *driver)
 {
-    if ((driver == NULL) || !driver->initialized) {
+    if (driver == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!driver->initialized && !driver->cleanup_required) {
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* Public motion commands stay blocked after a failed cleanup. */
+    driver->cleanup_required = false;
     esp_err_t first_error = tb6612_driver_stop_all(driver);
+    driver->cleanup_required = true;
     bool stby_inactive = false;
     if (driver->config.control_stby) {
         esp_err_t error = bsp_gpio_set_level(
@@ -521,6 +535,10 @@ esp_err_t tb6612_driver_deinit(Tb6612Driver *driver)
         remember_first_error(&first_error,
                              hold_motor_pins_safe(&driver->config));
     }
+    if (first_error != ESP_OK) {
+        return first_error;
+    }
+
     *driver = (Tb6612Driver)TB6612_DRIVER_INITIALIZER;
-    return first_error;
+    return ESP_OK;
 }

@@ -29,6 +29,9 @@ the same driver.
 - Setting `control_stby=false` is an explicit opt-out for a different board
   whose schematic proves that STBY is held active independently of firmware.
   The driver cannot detect that wiring.
+- If shutdown cannot release every resource, the handle enters a
+  cleanup-required state. Motion commands are rejected and
+  `tb6612_driver_deinit()` can be retried.
 
 Initialize every handle with `TB6612_DRIVER_INITIALIZER` before calling
 `tb6612_driver_init()`.

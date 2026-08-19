@@ -57,5 +57,5 @@ must_not_include:
   - feedback-control claim
 compile_command: idf.py -C examples_direct/tb6612_fixed_duty_test -B examples_direct/tb6612_fixed_duty_test/build_zsan_review -DMOCE_BOARD=my_board_esp32wroom build
 hardware_execution_status: blocked_by_unconnected_stby
-hardware_test_status: blocked_by_unconnected_stby
+hardware_test_status: untested
 ## END_MOCE_RECIPE_CONTEXT

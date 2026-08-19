@@ -50,6 +50,7 @@ typedef struct {
     uint8_t commanded_duty_percent[TB6612_DRIVER_MOTOR_COUNT];
     uint32_t max_duty;
     bool initialized;
+    bool cleanup_required;
 } Tb6612Driver;
 
 /**
@@ -91,6 +92,8 @@ esp_err_t tb6612_driver_get_commanded_output(
  * Stop both outputs and disable controlled STBY.
  * Pins are released only after controlled STBY is proven inactive. When STBY
  * is external, all six motor-control pins remain GPIO outputs driven low.
+ * On cleanup failure, output commands are rejected and the handle is retained
+ * so deinitialization can be retried.
  */
 esp_err_t tb6612_driver_deinit(Tb6612Driver *driver);
 
