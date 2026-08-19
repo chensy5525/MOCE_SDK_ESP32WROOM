@@ -1,5 +1,0 @@
-idf_component_register(
-    SRCS "main.c"
-    INCLUDE_DIRS "."
-    REQUIRES bsp_board mpu6050_direct_i2c
-)

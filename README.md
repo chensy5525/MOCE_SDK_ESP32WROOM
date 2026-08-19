@@ -1,115 +1,64 @@
-# Moce SDK
+# MOCE SDK ESP32-WROOM
 
-面向嵌入式产品开发的SDK，支持基于 ESP32 平台快速构建应用，提供统一的 BSP、驱动、组件、中间件与项目模板。
----
+本工作区只保留 `zsan` 分支正在维护的 ESP32-WROOM 固件、板级支持、
+最小例程、context 和构建工具。旧 Claude/Agent 工作流、按设备拆分的
+CH32 gateway 代码及无关历史例程已移除。
 
-## 仓库结构
-
-```text
-.
-├── bsp/                     # 板级与 GPIO/I2C/PWM 等硬件资源封装
-├── components/              # SDK 公共组件
-│   ├── driver_*             # LED/Button/Servo/OLED 等外设驱动
-│   └── service_*            # 面向应用的能力服务
-├── boards/                  # 板级支持包
-├── examples_ch32/                # 官方示例工程
-├── project/                 # 用户应用工程
-├── agent/                   # 本地 Web 智能硬件开发 Agent
-├── third_party/             # 第三方依赖
-│   └── esp-idf/             # ESP-IDF submodule
-├── tools/                   # 构建、烧写、辅助脚本
-├── docs/                    # 文档
-├── .gitmodules
-├── .gitignore
-└── README.md
-```
-## 使用方法
-
-### 克隆仓库
-```
-git clone --recurse-submodules git@github.com:wuyang9266/moce_sdk.git
-cd moce_sdk
-```
-如果已经完成普通 clone，但 submodule 没有拉取，可以执行：
-```
-git submodule update --init --recursive
-```
-
-### 更新submodule
-```
-git submodule update --init --recursive
-```
-如果 submodule 地址发生变化，可以执行：
-```
-git submodule sync --recursive
-git submodule update --init --recursive
-```
-
-### 初始化开发环境
-```
-./env/install.sh
-source ./env/export.sh #每次都要执行export
-```
-
-### 使用 Agent 工作台
-
-仓库内置了一个本地 Web 版智能硬件开发 Agent，可用于需求整理、任务拆解、器件选型、硬件资源规划、代码草稿生成，以及调用构建/烧录工具。
-
-启动方式：
-
-```powershell
-npm.cmd --prefix agent start
-```
-
-然后在浏览器打开：
+## 目录结构
 
 ```text
-http://127.0.0.1:4173
+boards/             ESP32-WROOM 板级配置与 sdkconfig defaults
+bsp/                GPIO、PWM、UART、I2S 等板级封装
+components_direct/  当前维护的 ESP32 直连组件
+examples_direct/    与组件对应的最小验证例程
+context/            保留的历史模块/板级 context
+docs/context/       device、transport、recipe、validation 契约
+docs/stage1/        已完成的输入冻结与实现导读
+docs/moce/          MOCE 草案与工作资料
+env/                开发环境脚本
+third_party/        ESP-IDF 固定版本 submodule
+tools/              构建、清理、烧录和串口监视工具
 ```
 
-如果是在前台终端启动的服务，按 `Ctrl + C` 即可停止。如果需要终止后台运行的 Agent，可以先查找监听 4173 端口的进程：
+## 当前维护能力
 
-PowerShell：
+- E104-BT01 UART
+- MSM261DGT003 PDM
+- MG90S Servo
+- TB6612FNG Motor Driver
+- Wi-Fi Alarm Portal（当前工作区未提交）
+
+每项能力应包含组件、最小例程，以及适用的 device、transport、recipe、
+validation context。历史 context 中若仍引用已移除的旧例程，只能作为历史
+线索，不能作为当前可编译或硬件验证通过的证据。
+
+## 初始化 ESP-IDF
+
+首次克隆后初始化固定版本 submodule：
 
 ```powershell
-netstat -ano | Select-String ':4173'
-Stop-Process -Id <PID>
+git submodule update --init --recursive
 ```
 
-cmd：
+## 构建
 
-```cmd
-netstat -ano | findstr :4173
-taskkill /PID <PID> /F
+默认构建 TB6612 最小例程：
+
+```powershell
+.\tools\build.ps1
 ```
 
-Agent 默认只会把生成的应用工程写入 `project/` 目录，不会修改 `components/`、`boards/`、`examples_ch32/` 等 SDK 目录。大模型 API 可以在 Web 界面中配置；未配置 API Key 时，Agent 会使用本地 fallback 流程生成功能分析、器件选型、硬件资源规划、硬件搭建框图和代码脚手架。
+显式构建其他例程：
 
-## 用户工作流
+```powershell
+.\tools\build.ps1 .\examples_direct\servo_direct_test esp32 my_board_esp32wroom
+.\tools\build.ps1 .\examples_direct\msm261dgt003_direct_pdm_test esp32 my_board_esp32wroom
+.\tools\build.ps1 .\examples_direct\e104_bt01_direct_uart_test esp32 my_board_esp32wroom
+```
 
-1. 完成开发环境的配置。
-2. 在prompt/中新建文本文档，用自然语言描述待开发功能，可以参照prompt目录下的其他模板。其中prompt0.md为开发约束，请勿改动。
-3. 将prompt0.md以及用户的功能描述prompt提交给大模型（建议用codex）
-4. 生成的工程位于/project目录下；
-5. 编译与烧录。Agent Web 界面会根据系统自动选择 Linux/macOS 的 `tools/*.sh` 或 Windows 的 `tools/*.ps1`。手动执行时：
+烧录和串口监视会操作硬件，执行前应确认目标、端口和当前固件：
 
-    Linux/macOS：
-    ```bash
-    ./tools/build.sh examples_ch32/<your_project_name> esp32 my_board_esp32wroom
-    ./tools/flash.sh examples_ch32/<your_project_name> --target esp32 --board my_board_esp32wroom --port /dev/ttyUSB0
-    ```
-
-    Windows PowerShell：
-    ```powershell
-    .\tools\build.ps1 examples_ch32/<your_project_name> esp32 my_board_esp32wroom
-    .\tools\flash.ps1 examples_ch32/<your_project_name> --target esp32 --board my_board_esp32wroom --port COM3
-    ```
-## 常见问题
-
-1. 串口没有权限
-
-    将当前用户加入 dialout 用户组：
-    ```
-    sudo usermod -aG dialout $USER
-    newgrp dialout
-    ```
+```powershell
+.\tools\flash.ps1 .\examples_direct\tb6612_fixed_duty_test --target esp32 --board my_board_esp32wroom --port COM3
+.\tools\monitor.ps1 .\examples_direct\tb6612_fixed_duty_test COM3
+```

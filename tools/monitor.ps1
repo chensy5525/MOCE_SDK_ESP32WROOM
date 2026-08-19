@@ -15,7 +15,7 @@ function Invoke-Idf {
 }
 
 if ([string]::IsNullOrWhiteSpace($ProjectDir)) {
-    $ProjectDir = Join-Path $SdkRoot "examples_ch32/final_test"
+    $ProjectDir = Join-Path $SdkRoot "examples_direct/tb6612_fixed_duty_test"
 }
 $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
 
