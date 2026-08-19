@@ -1,0 +1,11 @@
+menu "Alarm portal test"
+
+config ALARM_PORTAL_AP_SSID
+    string "SoftAP SSID"
+    default "AlarmCar-06"
+
+config ALARM_PORTAL_AP_PASSWORD
+    string "SoftAP password (empty or 8-63 characters)"
+    default "alarmcar06"
+
+endmenu
