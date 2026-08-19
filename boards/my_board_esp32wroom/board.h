@@ -89,6 +89,16 @@
 #define BOARD_I2S_PDM_CLK_GPIO               18
 #define BOARD_I2S_PDM_DATA_GPIO              2
 
+/*
+ * Native standard-I2S speaker path for the MAX98357A adapter.
+ * GPIO18/GPIO2 and I2S0 are shared with the PDM microphone path, so the BSP
+ * permits only one of the two modes to be initialized at a time.
+ */
+#define BOARD_I2S_STD_TX_PORT                 0
+#define BOARD_I2S_STD_TX_BCLK_GPIO            18
+#define BOARD_I2S_STD_TX_WS_GPIO              19
+#define BOARD_I2S_STD_TX_DATA_GPIO            2
+
 /* CAN transceiver */
 #define BOARD_CAN_TX_GPIO                    5
 #define BOARD_CAN_RX_GPIO                    4
