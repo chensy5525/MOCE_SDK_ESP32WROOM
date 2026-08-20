@@ -1,6 +1,7 @@
 # servo_direct_test
 
-Finite dual-MG90S direct-PWM validation recipe for the ESP32-WROOM board.
+Finite dual-MG90S arbitrary-angle direct-PWM validation recipe for the
+ESP32-WROOM board.
 
 ## Frozen binding
 
@@ -9,15 +10,18 @@ Finite dual-MG90S direct-PWM validation recipe for the ESP32-WROOM board.
 - Servo 2 signal: `PWM2` / GPIO33 / LEDC high-speed timer 1 channel 2.
 - Both channels use the shared 50 Hz timer at 16-bit resolution.
 - PWM: 50 Hz.
-- Pulse targets: 1000, 1250, 1500, 1750, and 2000 us.
+- Calibration targets: 0/45/90/135/180 degrees map to
+  1000/1250/1500/1750/2000 us.
+- Intermediate integer angles use piecewise-linear interpolation.
 
 The sequence is:
 
 ```text
-0 -> 45 -> 90 -> 135 -> 180 -> 135 -> 90
+0 -> 17 -> 63 -> 91 -> 127 -> 180 -> 90
 ```
 
-Both channels receive every command. Each command is held for 3 seconds. The
+The non-45-degree values exercise the arbitrary-angle API. Both channels
+receive every command. Each command is held for 3 seconds. The
 task then exits and leaves both final 90-degree PWM commands active; it does not
 cycle forever and does not use serial input to control either servo.
 
@@ -47,4 +51,6 @@ The earlier standalone evidence covers only one servo on PWM1/GPIO32 and does
 not validate this dual-channel source. The current dual-channel implementation
 is hardware-untested and requires a new regression before it can be called
 board-passed. Serial logs prove command execution only; they do not prove both
-PWM waveforms, supply integrity, or mechanical angle accuracy.
+PWM waveforms, supply integrity, or mechanical angle accuracy. Verify
+intermediate pulse widths with a scope or logic analyzer before accepting the
+interpolation path on hardware.

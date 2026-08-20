@@ -16,7 +16,8 @@ enforce that system-level rule.
 
 ## Supported command contract
 
-The public command set is limited to five nominal positions:
+The primary API accepts any integer command from 0 through 180 degrees. The
+driver interpolates pulse width between five configurable calibration points:
 
 | Command | Default pulse width |
 |---:|---:|
@@ -26,13 +27,18 @@ The public command set is limited to five nominal positions:
 | 135 degrees | 1750 us |
 | 180 degrees | 2000 us |
 
+For example, the default calibration maps 17 degrees to approximately 1094 us.
+The original five-position API remains as a compatibility wrapper; it is no
+longer the primary command contract.
+
 PWM frequency is fixed at 50 Hz. Pulse widths are configurable because real
 mechanical angle depends on the servo, supply, load, linkage, and calibration.
 The driver accepts only the conservative 1000 us to 2000 us command envelope;
 values outside that envelope are rejected before LEDC is configured. This is a
 software guardrail, not calibrated angle or stall-current evidence.
-`servo_driver_get_commanded_position()` returns the last accepted command; it is
-not position feedback.
+`servo_driver_get_commanded_angle()` returns the last accepted command; it is
+not position feedback. `servo_driver_get_commanded_position()` succeeds only
+when that command exactly matches one of the original five position tokens.
 
 ## Lifecycle
 
@@ -41,7 +47,7 @@ not position feedback.
 2. Call `servo_driver_config_default()`.
 3. Bind one to four output-capable GPIOs and unique LEDC channels.
 4. Call `servo_driver_init()`.
-5. Use `servo_driver_set_position()` or `servo_driver_set_all_positions()`.
+5. Use `servo_driver_set_angle()` or `servo_driver_set_all_angles()`.
 6. Call `servo_driver_deinit()` when the output should be released.
 
 Initialization starts every configured channel at the nominal 90-degree pulse.
@@ -49,7 +55,7 @@ If one channel fails to initialize, the driver attempts to stop every configured
 channel and release the timer. If rollback is incomplete, the handle enters the
 cleanup-required state so the caller can retry shutdown.
 
-`servo_driver_set_all_positions()` updates channels sequentially because ESP-IDF
+`servo_driver_set_all_angles()` updates channels sequentially because ESP-IDF
 LEDC does not provide an atomic multi-channel commit. If one update fails, the
 driver immediately commands every channel back to `initial_position`. If that
 recovery also fails, it stops every configured PWM output and leaves the handle

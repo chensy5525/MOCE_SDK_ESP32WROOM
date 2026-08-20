@@ -21,32 +21,109 @@ static bool position_is_valid(ServoPosition position)
     }
 }
 
-static esp_err_t position_to_pulse_width(const ServoDriverConfig *config,
-                                         ServoPosition position,
-                                         uint32_t *pulse_width_us)
+static bool angle_is_valid(uint16_t angle_degrees)
+{
+    return angle_degrees <= SERVO_DRIVER_MAX_ANGLE_DEG;
+}
+
+static esp_err_t angle_to_pulse_width(const ServoDriverConfig *config,
+                                      uint16_t angle_degrees,
+                                      uint32_t *pulse_width_us)
 {
     if ((config == NULL) || (pulse_width_us == NULL)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!angle_is_valid(angle_degrees)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint16_t lower_angle = 0U;
+    uint16_t upper_angle = 45U;
+    uint32_t lower_pulse_us = config->pulse_0_us;
+    uint32_t upper_pulse_us = config->pulse_45_us;
+
+    if (angle_degrees > 135U) {
+        lower_angle = 135U;
+        upper_angle = 180U;
+        lower_pulse_us = config->pulse_135_us;
+        upper_pulse_us = config->pulse_180_us;
+    } else if (angle_degrees > 90U) {
+        lower_angle = 90U;
+        upper_angle = 135U;
+        lower_pulse_us = config->pulse_90_us;
+        upper_pulse_us = config->pulse_135_us;
+    } else if (angle_degrees > 45U) {
+        lower_angle = 45U;
+        upper_angle = 90U;
+        lower_pulse_us = config->pulse_45_us;
+        upper_pulse_us = config->pulse_90_us;
+    }
+
+    uint32_t pulse_span_us = upper_pulse_us - lower_pulse_us;
+    uint16_t angle_span = upper_angle - lower_angle;
+    uint16_t angle_offset = angle_degrees - lower_angle;
+    uint64_t scaled_offset = (uint64_t)pulse_span_us * angle_offset;
+    *pulse_width_us = lower_pulse_us +
+                      (uint32_t)((scaled_offset + (angle_span / 2U)) /
+                                 angle_span);
+    return ESP_OK;
+}
+
+static esp_err_t position_to_degrees(ServoPosition position,
+                                     uint16_t *degrees)
+{
+    if (degrees == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
     switch (position) {
         case SERVO_POSITION_0_DEG:
-            *pulse_width_us = config->pulse_0_us;
+            *degrees = 0U;
             break;
         case SERVO_POSITION_45_DEG:
-            *pulse_width_us = config->pulse_45_us;
+            *degrees = 45U;
             break;
         case SERVO_POSITION_90_DEG:
-            *pulse_width_us = config->pulse_90_us;
+            *degrees = 90U;
             break;
         case SERVO_POSITION_135_DEG:
-            *pulse_width_us = config->pulse_135_us;
+            *degrees = 135U;
             break;
         case SERVO_POSITION_180_DEG:
-            *pulse_width_us = config->pulse_180_us;
+            *degrees = 180U;
             break;
         default:
             return ESP_ERR_INVALID_ARG;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t degrees_to_position(uint16_t degrees,
+                                     ServoPosition *position)
+{
+    if (position == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    switch (degrees) {
+        case 0U:
+            *position = SERVO_POSITION_0_DEG;
+            break;
+        case 45U:
+            *position = SERVO_POSITION_45_DEG;
+            break;
+        case 90U:
+            *position = SERVO_POSITION_90_DEG;
+            break;
+        case 135U:
+            *position = SERVO_POSITION_135_DEG;
+            break;
+        case 180U:
+            *position = SERVO_POSITION_180_DEG;
+            break;
+        default:
+            return ESP_ERR_INVALID_STATE;
     }
 
     return ESP_OK;
@@ -180,11 +257,11 @@ static uint32_t pulse_width_to_duty(const ServoDriver *driver,
                       driver->pwm_period_us);
 }
 
-static esp_err_t apply_position_to_all_channels(ServoDriver *driver,
-                                                ServoPosition position)
+static esp_err_t apply_angle_to_all_channels(ServoDriver *driver,
+                                             uint16_t angle_degrees)
 {
     for (uint8_t index = 0U; index < driver->config.channel_count; ++index) {
-        esp_err_t error = servo_driver_set_position(driver, index, position);
+        esp_err_t error = servo_driver_set_angle(driver, index, angle_degrees);
         if (error != ESP_OK) {
             return error;
         }
@@ -232,12 +309,17 @@ esp_err_t servo_driver_init(ServoDriver *driver,
     candidate.pwm_period_us = 1000000U / config->frequency_hz;
     candidate.max_duty = bsp_pwm_max_duty(config->duty_resolution);
 
-    uint32_t initial_pulse_us = 0U;
-    ESP_RETURN_ON_ERROR(position_to_pulse_width(config,
-                                                config->initial_position,
-                                                &initial_pulse_us),
+    uint16_t initial_angle_degrees = 0U;
+    ESP_RETURN_ON_ERROR(position_to_degrees(config->initial_position,
+                                            &initial_angle_degrees),
                         TAG,
                         "initial position is invalid");
+    uint32_t initial_pulse_us = 0U;
+    ESP_RETURN_ON_ERROR(angle_to_pulse_width(config,
+                                             initial_angle_degrees,
+                                             &initial_pulse_us),
+                        TAG,
+                        "initial angle conversion failed");
     uint32_t initial_duty = pulse_width_to_duty(&candidate, initial_pulse_us);
 
     bsp_pwm_timer_config_t timer_config = {
@@ -278,7 +360,7 @@ esp_err_t servo_driver_init(ServoDriver *driver,
             return error;
         }
 
-        candidate.commanded_positions[index] = config->initial_position;
+        candidate.commanded_angles_deg[index] = initial_angle_degrees;
     }
 
     candidate.initialized = true;
@@ -286,9 +368,9 @@ esp_err_t servo_driver_init(ServoDriver *driver,
     return ESP_OK;
 }
 
-esp_err_t servo_driver_set_position(ServoDriver *driver,
-                                    uint8_t channel_index,
-                                    ServoPosition position)
+esp_err_t servo_driver_set_angle(ServoDriver *driver,
+                                 uint8_t channel_index,
+                                 uint16_t angle_degrees)
 {
     if (driver == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -301,11 +383,11 @@ esp_err_t servo_driver_set_position(ServoDriver *driver,
     }
 
     uint32_t pulse_width_us = 0U;
-    ESP_RETURN_ON_ERROR(position_to_pulse_width(&driver->config,
-                                                position,
-                                                &pulse_width_us),
+    ESP_RETURN_ON_ERROR(angle_to_pulse_width(&driver->config,
+                                             angle_degrees,
+                                             &pulse_width_us),
                         TAG,
-                        "position is invalid");
+                        "angle is invalid");
     uint32_t duty = pulse_width_to_duty(driver, pulse_width_us);
     esp_err_t error = bsp_pwm_set_duty(
         driver->config.speed_mode,
@@ -315,12 +397,12 @@ esp_err_t servo_driver_set_position(ServoDriver *driver,
         return error;
     }
 
-    driver->commanded_positions[channel_index] = position;
+    driver->commanded_angles_deg[channel_index] = angle_degrees;
     return ESP_OK;
 }
 
-esp_err_t servo_driver_set_all_positions(ServoDriver *driver,
-                                         ServoPosition position)
+esp_err_t servo_driver_set_all_angles(ServoDriver *driver,
+                                      uint16_t angle_degrees)
 {
     if (driver == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -328,11 +410,11 @@ esp_err_t servo_driver_set_all_positions(ServoDriver *driver,
     if (!driver->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (!position_is_valid(position)) {
+    if (!angle_is_valid(angle_degrees)) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    esp_err_t command_error = apply_position_to_all_channels(driver, position);
+    esp_err_t command_error = apply_angle_to_all_channels(driver, angle_degrees);
     if (command_error == ESP_OK) {
         return ESP_OK;
     }
@@ -340,9 +422,12 @@ esp_err_t servo_driver_set_all_positions(ServoDriver *driver,
     ESP_LOGE(TAG,
              "coordinated command failed: %s; restoring all channels to the initial position",
              esp_err_to_name(command_error));
-    esp_err_t safe_error = apply_position_to_all_channels(
-        driver,
-        driver->config.initial_position);
+    uint16_t safe_angle_degrees = 0U;
+    esp_err_t safe_error = position_to_degrees(driver->config.initial_position,
+                                               &safe_angle_degrees);
+    if (safe_error == ESP_OK) {
+        safe_error = apply_angle_to_all_channels(driver, safe_angle_degrees);
+    }
     if (safe_error == ESP_OK) {
         ESP_LOGW(TAG, "all channels restored to the initial position");
         return command_error;
@@ -360,6 +445,43 @@ esp_err_t servo_driver_set_all_positions(ServoDriver *driver,
     return command_error;
 }
 
+esp_err_t servo_driver_get_commanded_angle(const ServoDriver *driver,
+                                           uint8_t channel_index,
+                                           uint16_t *angle_degrees)
+{
+    if ((driver == NULL) || (angle_degrees == NULL)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!driver->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (channel_index >= driver->config.channel_count) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *angle_degrees = driver->commanded_angles_deg[channel_index];
+    return ESP_OK;
+}
+
+esp_err_t servo_driver_set_position(ServoDriver *driver,
+                                    uint8_t channel_index,
+                                    ServoPosition position)
+{
+    uint16_t angle_degrees = 0U;
+    esp_err_t error = position_to_degrees(position, &angle_degrees);
+    return (error == ESP_OK) ?
+           servo_driver_set_angle(driver, channel_index, angle_degrees) : error;
+}
+
+esp_err_t servo_driver_set_all_positions(ServoDriver *driver,
+                                         ServoPosition position)
+{
+    uint16_t angle_degrees = 0U;
+    esp_err_t error = position_to_degrees(position, &angle_degrees);
+    return (error == ESP_OK) ?
+           servo_driver_set_all_angles(driver, angle_degrees) : error;
+}
+
 esp_err_t servo_driver_get_commanded_position(const ServoDriver *driver,
                                               uint8_t channel_index,
                                               ServoPosition *position)
@@ -374,8 +496,8 @@ esp_err_t servo_driver_get_commanded_position(const ServoDriver *driver,
         return ESP_ERR_INVALID_ARG;
     }
 
-    *position = driver->commanded_positions[channel_index];
-    return ESP_OK;
+    return degrees_to_position(driver->commanded_angles_deg[channel_index],
+                               position);
 }
 
 esp_err_t servo_driver_deinit(ServoDriver *driver)
@@ -403,29 +525,5 @@ esp_err_t servo_driver_deinit(ServoDriver *driver)
 esp_err_t servo_driver_position_to_degrees(ServoPosition position,
                                            uint16_t *degrees)
 {
-    if (degrees == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    switch (position) {
-        case SERVO_POSITION_0_DEG:
-            *degrees = 0U;
-            break;
-        case SERVO_POSITION_45_DEG:
-            *degrees = 45U;
-            break;
-        case SERVO_POSITION_90_DEG:
-            *degrees = 90U;
-            break;
-        case SERVO_POSITION_135_DEG:
-            *degrees = 135U;
-            break;
-        case SERVO_POSITION_180_DEG:
-            *degrees = 180U;
-            break;
-        default:
-            return ESP_ERR_INVALID_ARG;
-    }
-
-    return ESP_OK;
+    return position_to_degrees(position, degrees);
 }

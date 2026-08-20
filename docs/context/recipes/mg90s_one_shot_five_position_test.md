@@ -1,10 +1,10 @@
 ## MOCE_RECIPE_CONTEXT
-recipe_id: mg90s_dual_one_shot_five_position_test
-purpose: command two MG90S instances through one finite 45-degree-step sweep and finish both at the 90-degree command
+recipe_id: mg90s_dual_arbitrary_angle_test
+purpose: command two MG90S instances through finite non-45-degree targets and finish both at the 90-degree command
 supported_boards:
   - my_board_esp32wroom
 user_goal:
-  - verify that two MG90S servos can be commanded through five fixed nominal positions
+  - verify that two MG90S servos accept arbitrary integer angle commands from 0 through 180 degrees
 selected_devices:
   - mg90s_servo
 device_instances:
@@ -21,9 +21,9 @@ node_plan:
   policy: not_applicable
   expected_node_count: 0
 required_behavior:
-  - command both instances to 0, 45, 90, 135, 180, 135, and 90 degrees
+  - command both instances to 0, 17, 63, 91, 127, 180, and 90 degrees
   - hold each command for 3000 ms
-  - keep every adjacent command difference at 45 degrees
+  - include intermediate commands that are not multiples of 45 degrees
   - stop switching after both final 90-degree commands
 controller_responsibilities:
   - own the finite test sequence
@@ -32,10 +32,10 @@ controller_responsibilities:
   - log each commanded position and completion
 device_adapter_responsibilities:
   - validate configuration and command values
-  - map five position commands to configured pulse widths
+  - map integer 0-through-180-degree commands through configured calibration points
   - retain only the last successfully commanded position as software state
 serial_log:
-  - recipe=mg90s_dual_one_shot_five_position_test
+  - recipe=mg90s_dual_arbitrary_angle_test
   - selected_devices=mg90s_servo instances=2
   - transport=esp32_native_pwm pwm1_gpio=32 pwm2_gpio=33 frequency=50Hz
   - position=<0|45|90|135|180|135|90> commanded on both channels; observe both servos

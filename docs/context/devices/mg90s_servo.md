@@ -13,13 +13,15 @@ device_semantics:
   read_operations:
     - none; no host-readable position or fault feedback is available
   write_operations:
-    - set_position: nominal command in 0, 45, 90, 135, or 180 degrees
+    - set_angle: integer target command from 0 through 180 degrees
+    - set_position: compatibility command in 0, 45, 90, 135, or 180 degrees
   data_conversion:
-    - 0,45,90,135,180 commands map to configurable PWM pulse targets
+    - integer angles use piecewise-linear pulse interpolation between configurable 0,45,90,135,180-degree calibration points
 capabilities:
-  - switch among five nominal position commands
+  - command any integer target angle from 0 through 180 degrees
+  - command one selected channel or all configured channels
 unsupported:
-  - arbitrary continuous-angle accuracy
+  - calibrated mechanical angle accuracy without per-device measurement
   - measured position feedback
   - arrival confirmation
   - current, temperature, or stall feedback
@@ -30,11 +32,11 @@ safe_defaults:
   - a multi-servo recipe failure should request the nominal 90-degree command for every selected instance
   - disable every selected PWM output if the group safe-position command cannot be applied
 user_phrases:
-  - switch the servo angle in 45-degree steps
+  - set either servo to any integer angle from 0 to 180 degrees
   - move the MG90S to a fixed position
 forbidden_contamination:
   - motor speed-control semantics
   - continuous-rotation claims
   - serial-control requirements
-validation_status: compile_passed
+validation_status: untested
 ## END_MOCE_DEVICE_CONTEXT

@@ -20,6 +20,8 @@ extern "C" {
 #define SERVO_DRIVER_DEFAULT_180_PULSE_US  2000U
 #define SERVO_DRIVER_MIN_PULSE_US          1000U
 #define SERVO_DRIVER_MAX_PULSE_US          2000U
+#define SERVO_DRIVER_MIN_ANGLE_DEG          0U
+#define SERVO_DRIVER_MAX_ANGLE_DEG          180U
 #define SERVO_DRIVER_INITIALIZER            {0}
 
 typedef enum {
@@ -52,7 +54,7 @@ typedef struct {
 
 typedef struct {
     ServoDriverConfig config;
-    ServoPosition commanded_positions[SERVO_DRIVER_MAX_CHANNELS];
+    uint16_t commanded_angles_deg[SERVO_DRIVER_MAX_CHANNELS];
     uint32_t pwm_period_us;
     uint32_t max_duty;
     bool initialized;
@@ -69,7 +71,21 @@ esp_err_t servo_driver_config_default(ServoDriverConfig *config);
 esp_err_t servo_driver_init(ServoDriver *driver,
                             const ServoDriverConfig *config);
 
-/** Apply one of the five supported nominal position commands. */
+/** Apply an integer angle command in the inclusive 0..180 degree range. */
+esp_err_t servo_driver_set_angle(ServoDriver *driver,
+                                 uint8_t channel_index,
+                                 uint16_t angle_degrees);
+
+/** Apply the same integer angle command to every configured channel. */
+esp_err_t servo_driver_set_all_angles(ServoDriver *driver,
+                                      uint16_t angle_degrees);
+
+/** Return software command state only; this is not physical position feedback. */
+esp_err_t servo_driver_get_commanded_angle(const ServoDriver *driver,
+                                           uint8_t channel_index,
+                                           uint16_t *angle_degrees);
+
+/** Compatibility wrapper for the original five nominal position commands. */
 esp_err_t servo_driver_set_position(ServoDriver *driver,
                                     uint8_t channel_index,
                                     ServoPosition position);
@@ -83,7 +99,10 @@ esp_err_t servo_driver_set_position(ServoDriver *driver,
 esp_err_t servo_driver_set_all_positions(ServoDriver *driver,
                                          ServoPosition position);
 
-/** Return software command state only; this is not physical position feedback. */
+/**
+ * Compatibility query for a five-position command. Returns
+ * ESP_ERR_INVALID_STATE when the last accepted command was an intermediate angle.
+ */
 esp_err_t servo_driver_get_commanded_position(const ServoDriver *driver,
                                               uint8_t channel_index,
                                               ServoPosition *position);
