@@ -7,7 +7,7 @@
 #include "freertos/task.h"
 #include "servo_driver.h"
 
-#define SERVO_TEST_RECIPE_ID             "mg90s_dual_one_shot_five_position_test"
+#define SERVO_TEST_RECIPE_ID             "mg90s_dual_arbitrary_angle_test"
 #define SERVO_TEST_CHANNEL_0             0U
 #define SERVO_TEST_CHANNEL_1             1U
 #define SERVO_TEST_CHANNEL_COUNT         2U
@@ -19,45 +19,38 @@ _Static_assert(BOARD_SERVO_COUNT == SERVO_TEST_CHANNEL_COUNT,
 
 static const char *TAG = "servo_direct_test";
 
-static const ServoPosition TEST_POSITIONS[] = {
-    SERVO_POSITION_0_DEG,
-    SERVO_POSITION_45_DEG,
-    SERVO_POSITION_90_DEG,
-    SERVO_POSITION_135_DEG,
-    SERVO_POSITION_180_DEG,
-    SERVO_POSITION_135_DEG,
-    SERVO_POSITION_90_DEG,
+static const uint16_t TEST_ANGLES_DEG[] = {
+    0U,
+    17U,
+    63U,
+    91U,
+    127U,
+    180U,
+    90U,
 };
 
-static esp_err_t run_position_test(ServoDriver *driver)
+static esp_err_t run_angle_test(ServoDriver *driver)
 {
     if (driver == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
     for (size_t index = 0U;
-         index < ARRAY_SIZE(TEST_POSITIONS);
+         index < ARRAY_SIZE(TEST_ANGLES_DEG);
          ++index) {
-        ServoPosition position = TEST_POSITIONS[index];
-        uint16_t degrees = 0U;
-        esp_err_t error = servo_driver_position_to_degrees(position, &degrees);
-        if (error != ESP_OK) {
-            ESP_LOGE(TAG, "invalid recipe position at index=%u", (unsigned)index);
-            return error;
-        }
-
-        error = servo_driver_set_all_positions(driver, position);
+        uint16_t angle_degrees = TEST_ANGLES_DEG[index];
+        esp_err_t error = servo_driver_set_all_angles(driver, angle_degrees);
         if (error != ESP_OK) {
             ESP_LOGE(TAG,
-                     "dual position=%u command failed: %s",
-                     (unsigned)degrees,
+                     "dual angle=%u command failed: %s",
+                     (unsigned)angle_degrees,
                      esp_err_to_name(error));
             return error;
         }
 
         ESP_LOGI(TAG,
-                 "position=%u commanded on both channels; observe both servos",
-                 (unsigned)degrees);
+                 "angle=%u commanded on both channels; observe both servos",
+                 (unsigned)angle_degrees);
         vTaskDelay(pdMS_TO_TICKS(SERVO_TEST_POSITION_HOLD_MS));
     }
 
@@ -71,9 +64,7 @@ static void enter_safe_state(ServoDriver *driver)
     }
 
     if (driver->initialized) {
-        esp_err_t error = servo_driver_set_all_positions(
-            driver,
-            SERVO_POSITION_90_DEG);
+        esp_err_t error = servo_driver_set_all_angles(driver, 90U);
         if (error == ESP_OK) {
             ESP_LOGW(TAG,
                      "safe state applied: both channels at nominal 90 degrees");
@@ -127,7 +118,7 @@ void app_main(void)
              config.channels[SERVO_TEST_CHANNEL_0].gpio,
              config.channels[SERVO_TEST_CHANNEL_1].gpio,
              (unsigned)config.frequency_hz);
-    ESP_LOGI(TAG, "test sequence=0,45,90,135,180,135,90");
+    ESP_LOGI(TAG, "test sequence=0,17,63,91,127,180,90 degrees");
 
     error = servo_driver_init(&driver, &config);
     if (error != ESP_OK) {
@@ -138,7 +129,7 @@ void app_main(void)
         return;
     }
 
-    error = run_position_test(&driver);
+    error = run_angle_test(&driver);
     if (error != ESP_OK) {
         ESP_LOGE(TAG, "test aborted; entering the defined safe state");
         enter_safe_state(&driver);
