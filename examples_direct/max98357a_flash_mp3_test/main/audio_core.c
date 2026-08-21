@@ -26,8 +26,12 @@ static AudioStereoFrame read_input_frame(const int16_t *input,
         frame.left = input[index];
         frame.right = input[index];
     } else {
-        frame.left = input[index * 2U];
-        frame.right = input[(index * 2U) + 1U];
+        /* Downmix before resampling so a single speaker receives both sides. */
+        const int32_t left = input[index * 2U];
+        const int32_t right = input[(index * 2U) + 1U];
+        const int16_t mono = (int16_t)((left + right) / 2);
+        frame.left = mono;
+        frame.right = mono;
     }
     return frame;
 }

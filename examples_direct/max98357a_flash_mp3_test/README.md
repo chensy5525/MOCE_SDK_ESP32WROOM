@@ -1,8 +1,10 @@
 # MAX98357A Flash MP3 test
 
 This example reads `/audio/test.mp3` from an embedded FATFS image, decodes it
-with Espressif `esp_audio_codec`, converts mono/stereo 16-bit PCM to 48 kHz
-stereo, applies volume and limiting, and streams it to MAX98357A over I2S0.
+with Espressif `esp_audio_codec`, downmixes stereo PCM to mono and duplicates
+that mono signal into both I2S slots, converts it to 48 kHz, applies volume
+and limiting, and streams it to MAX98357A over I2S0. The downmix prevents a
+single speaker from losing content that exists on only one source channel.
 
 MP3 decoding, resampling, volume ramping, mixing, and playback policy are kept
 inside this example. The reusable `max98357a_direct` component only initializes
@@ -35,3 +37,7 @@ idf.py -B build build
 ```
 
 Flashing is intentionally a separate, confirmation-gated operation.
+
+See [AUDIO_IMPLEMENTATION.md](AUDIO_IMPLEMENTATION.md) for the processing
+pipeline, implementation differences, validation evidence, and remaining
+integration limits.
