@@ -1,0 +1,21 @@
+menu "Alarm car Wi-Fi portal"
+
+config ALARM_CAR_PORTAL_AP_SSID
+    string "SoftAP SSID"
+    default "MOCE-AlarmCar"
+
+config ALARM_CAR_PORTAL_AP_PASSWORD
+    string "SoftAP password (8-63 characters)"
+    default "mocemoce"
+
+config ALARM_CAR_PORTAL_MAX_CONNECTIONS
+    int "Maximum SoftAP stations"
+    range 1 4
+    default 4
+
+config ALARM_CAR_SCHEDULER_TASK_STACK_SIZE
+    int "Alarm scheduler task stack size"
+    range 3072 8192
+    default 4096
+
+endmenu
