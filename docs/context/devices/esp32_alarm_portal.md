@@ -10,6 +10,10 @@
 
 - Start/stop SoftAP and local HTTP server.
 - Load and persist a versioned alarm record in NVS namespace `alarm06`.
+- Accept a bounded user-provided upstream SSID/password without returning or logging the password.
+- Persist an upstream network only after it obtains an IP; restore the previous runtime network on
+  connection or storage failure.
+- Persist an explicit cleared-network record in NVS namespace `alarm_net`.
 - Validate time and enabled state before handing them to the controller callback.
 - Leave the last valid alarm unchanged when validation or controller application fails.
 
@@ -19,3 +23,5 @@
 - Do not alter GPIO0, EN, bootloader, partition table, or download behavior.
 - The callback is bounded and non-blocking; it may copy to a controller queue/state only.
 - Wi-Fi failure does not directly start audio or modify amplifier/SD resources.
+- Network configuration is development-only: the shared SoftAP credential and unauthenticated HTTP
+  endpoint do not satisfy product-release authentication or confidentiality requirements.

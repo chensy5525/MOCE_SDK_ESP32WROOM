@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "main.c"
     INCLUDE_DIRS "."
-    REQUIRES wifi_alarm_portal
+    REQUIRES esp_netif wifi_alarm_portal
 )

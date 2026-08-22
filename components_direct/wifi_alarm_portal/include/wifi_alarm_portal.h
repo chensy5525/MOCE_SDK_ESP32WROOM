@@ -74,6 +74,10 @@ typedef esp_err_t (*WifiAlarmApplyCallback)(
 typedef struct {
     const char *ap_ssid;
     const char *ap_password;
+    /** Optional upstream network. NULL or an empty SSID keeps AP-only mode. */
+    const char *sta_ssid;
+    const char *sta_password;
+    uint8_t sta_maximum_retries;
     uint8_t max_connections;
     WifiAlarmApplyCallback apply_callback;
     WifiAlarmPortalEventCallback event_callback;
@@ -81,8 +85,20 @@ typedef struct {
     void *user_context;
 } WifiAlarmPortalOptions;
 
-/** Start the exclusive ESP32 SoftAP, NVS-backed alarm configuration, and HTTP server. */
+/** Start SoftAP (and optional STA), NVS-backed alarm configuration, and HTTP server. */
 esp_err_t wifi_alarm_portal_start(const WifiAlarmPortalOptions *options);
+
+/** Wait a bounded time for the optional station interface to obtain an IP. */
+esp_err_t wifi_alarm_portal_wait_for_sta_ip(uint32_t timeout_ms);
+
+/** Start a new bounded station connection attempt after a previous failure. */
+esp_err_t wifi_alarm_portal_reconnect_sta(void);
+
+/** Disable only the station interface; SoftAP/HTTP remain available. */
+esp_err_t wifi_alarm_portal_suspend_sta(void);
+
+/** Restore APSTA mode after a station suspension. */
+esp_err_t wifi_alarm_portal_resume_sta(void);
 
 /** Copy the current schedule. Debug version supports schedule_id 0 only. */
 esp_err_t wifi_alarm_portal_get_config(WifiAlarmConfig *config);

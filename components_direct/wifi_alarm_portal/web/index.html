@@ -13,11 +13,11 @@
     .hero{padding:20px 4px 12px}.eyebrow{margin:0 0 7px;color:var(--brand);font-size:12px;font-weight:800;letter-spacing:.12em}.hero h1{margin:0;font-size:clamp(28px,8vw,38px);line-height:1.15;letter-spacing:-.04em}.hero p{margin:9px 0 0;color:var(--muted);line-height:1.55}
     .card{margin:14px 0;padding:20px;border:1px solid rgba(194,210,227,.8);border-radius:20px;background:rgba(255,255,255,.96);box-shadow:var(--shadow)}.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}.card h2{margin:0;font-size:18px;letter-spacing:-.02em}.card-subtitle{margin:4px 0 0;color:var(--muted);font-size:12px}.badge{padding:6px 10px;border-radius:999px;background:var(--brand-soft);color:var(--brand);font-size:11px;font-weight:800;white-space:nowrap}
     .status{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.item{min-height:78px;padding:13px;border:1px solid #e5edf6;border-radius:14px;background:#f8fbff}.label{display:block;margin-bottom:7px;color:var(--muted);font-size:11px;font-weight:600}.value{display:block;overflow-wrap:anywhere;font-size:14px;font-weight:750;line-height:1.35}.value.good{color:var(--green)}.value.alert{color:var(--red)}
-    .field-label{display:block;margin-bottom:8px;color:var(--muted);font-size:12px;font-weight:700}input[type=time]{width:100%;height:64px;padding:0 16px;border:1.5px solid var(--line);border-radius:14px;outline:0;background:#f8fbff;color:var(--text);font-size:28px;font-weight:750;letter-spacing:.02em;transition:.2s}input[type=time]:focus{border-color:var(--brand);box-shadow:0 0 0 4px rgba(11,107,232,.1)}
+    .field-label{display:block;margin:14px 0 8px;color:var(--muted);font-size:12px;font-weight:700}input[type=time],input[type=text],input[type=password],select{width:100%;height:50px;padding:0 14px;border:1.5px solid var(--line);border-radius:13px;outline:0;background:#f8fbff;color:var(--text);font-size:15px;transition:.2s}input[type=time]{height:64px;padding:0 16px;font-size:28px;font-weight:750;letter-spacing:.02em}input:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 4px rgba(11,107,232,.1)}.inline-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.inline-actions button{margin-top:10px}.password-row{display:flex;align-items:center;gap:9px;margin-top:9px;color:var(--muted);font-size:12px}.password-row input{width:17px;height:17px}.network-note{margin:10px 0 0;color:var(--muted);font-size:12px;line-height:1.5}
     .section-label{margin:18px 0 9px;color:var(--muted);font-size:12px;font-weight:700}.week{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}.day{position:relative}.day input{position:absolute;width:1px;height:1px;opacity:0}.day span{display:grid;place-items:center;aspect-ratio:1;min-height:42px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--muted);font-size:13px;font-weight:700;cursor:pointer;transition:.18s}.day input:checked+span{border-color:var(--brand);background:var(--brand);color:#fff;box-shadow:0 5px 12px rgba(11,107,232,.2)}.day input:focus-visible+span{outline:3px solid rgba(11,107,232,.2);outline-offset:2px}
     .settings{margin-top:18px;border-top:1px solid #e8eef5}.toggle{display:flex;align-items:center;justify-content:space-between;min-height:58px;border-bottom:1px solid #e8eef5;font-weight:650}.switch{position:relative;width:46px;height:26px;flex:0 0 auto}.switch input{position:absolute;opacity:0}.slider{position:absolute;inset:0;border-radius:999px;background:#ccd8e5;cursor:pointer;transition:.2s}.slider::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(9,36,67,.22);transition:.2s}.switch input:checked+.slider{background:var(--brand)}.switch input:checked+.slider::after{transform:translateX(20px)}.switch input:focus-visible+.slider{outline:3px solid rgba(11,107,232,.2);outline-offset:2px}
     button{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:50px;margin-top:14px;padding:0 16px;border:0;border-radius:13px;background:var(--brand);color:#fff;font-weight:800;cursor:pointer;box-shadow:0 7px 16px rgba(11,107,232,.2);transition:transform .15s,background .15s,opacity .15s}button:hover{background:var(--brand-dark)}button:active{transform:translateY(1px)}button.secondary{border:1px solid #bcd3ee;background:#fff;color:var(--brand);box-shadow:none}button.secondary:hover{background:var(--brand-soft)}button.danger{border:1px solid #f2c3c9;background:var(--red-soft);color:var(--red);box-shadow:none}button.danger:hover{background:#ffe4e8}button:disabled{cursor:not-allowed;opacity:.55;transform:none}
-    #message:empty{display:none}#message{margin-top:14px;padding:11px 13px;border-radius:11px;font-size:13px;font-weight:650;line-height:1.45}.ok{background:var(--green-soft);color:var(--green)}.error{background:var(--red-soft);color:var(--red)}.hint{margin:14px 0 0;color:var(--muted);font-size:11px;line-height:1.55}.footer{text-align:center;color:#8a9aad;font-size:11px;padding:8px 0}
+    .message:empty{display:none}.message{margin-top:14px;padding:11px 13px;border-radius:11px;font-size:13px;font-weight:650;line-height:1.45}.ok{background:var(--green-soft);color:var(--green)}.error{background:var(--red-soft);color:var(--red)}.hint{margin:14px 0 0;color:var(--muted);font-size:11px;line-height:1.55}.footer{text-align:center;color:#8a9aad;font-size:11px;padding:8px 0}
     @media(max-width:420px){main{padding-inline:12px}.card{padding:17px;border-radius:18px}.item{min-height:72px;padding:11px}.week{gap:5px}.day span{min-height:39px;border-radius:10px}.online span{display:none}}
     @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
   </style>
@@ -41,7 +41,29 @@
       <div class="item"><span class="label">闹钟方案</span><span id="summary" class="value">--</span></div>
       <div class="item"><span class="label">触发状态</span><span id="ringing" class="value">--</span></div>
     </div>
-    <button id="sync" class="secondary" type="button">同步手机时间</button>
+  </section>
+  <section class="card">
+    <div class="card-head"><div><h2>上游 Wi-Fi</h2><p class="card-subtitle">用于 SNTP 网络校时，密码仅写入小车</p></div><span class="badge">AP + STA</span></div>
+    <div class="status">
+      <div class="item"><span class="label">当前网络</span><span id="network-ssid-state" class="value">未配置</span></div>
+      <div class="item"><span class="label">连接状态</span><span id="network-link-state" class="value">--</span></div>
+    </div>
+    <button id="network-scan" class="secondary" type="button">扫描附近网络</button>
+    <form id="network-form">
+      <label class="field-label" for="network-list">扫描结果</label>
+      <select id="network-list"><option value="">手动输入网络名称</option></select>
+      <label class="field-label" for="network-ssid">Wi-Fi 名称（SSID）</label>
+      <input id="network-ssid" type="text" maxlength="32" autocomplete="off" placeholder="例如：MOCE" required>
+      <label class="field-label" for="network-password">Wi-Fi 密码</label>
+      <input id="network-password" type="password" maxlength="63" autocomplete="new-password" placeholder="开放网络留空；加密网络至少 8 位">
+      <label class="password-row"><input id="network-show-password" type="checkbox"><span>显示密码</span></label>
+      <div class="inline-actions">
+        <button id="network-save" type="submit">连接并保存</button>
+        <button id="network-clear" class="danger" type="button">清除配置</button>
+      </div>
+    </form>
+    <p class="network-note">小车会先试连，取得 IP 后才写入 NVS；失败会自动恢复原网络。切换信道时网页可能短暂断开，请保持连接设备热点。</p>
+    <div id="network-message" class="message"></div>
   </section>
   <section class="card">
     <div class="card-head"><div><h2>闹钟计划</h2><p class="card-subtitle">当前调试版本支持 1 个计划</p></div><span class="badge">PLAN 01</span></div>
@@ -64,31 +86,43 @@
       </div>
       <button id="save" type="submit">保存闹钟计划</button>
     </form>
-    <p class="hint">计划会保存到 ESP32 掉电存储。设备重启后需重新连接网页同步手机时间。</p>
+    <p class="hint">计划会保存到 ESP32 掉电存储。设备时间由上游 Wi-Fi 和 SNTP 自动校准。</p>
   </section>
   <section class="card">
     <div class="card-head"><div><h2>本次响铃</h2><p class="card-subtitle">只停止当前事件，不影响下次重复计划</p></div></div>
     <button id="stop" class="danger" type="button">停止本次响铃</button>
-    <div id="message"></div>
+    <div id="message" class="message"></div>
   </section>
   <footer class="footer">MOCE Embedded Control · Local Device Portal</footer>
 </main>
 <script>
 "use strict";
-const api={status:"/api/v1/status",alarm:"/api/v1/alarm/0",sync:"/api/v1/time/sync",stop:"/api/v1/alarm/stop"};
+const api={status:"/api/v1/status",alarm:"/api/v1/alarm/0",stop:"/api/v1/alarm/stop",networkStatus:"/api/v1/network/status",networkConfig:"/api/v1/network/config",networkScan:"/api/v1/network/scan"};
 const el=id=>document.getElementById(id), days=["周一","周二","周三","周四","周五","周六","周日"];
-function message(text,ok){el("message").textContent=text;el("message").className=ok?"ok":"error"}
-async function request(url,options={}){const c=new AbortController(),t=setTimeout(()=>c.abort(),5000);try{const r=await fetch(url,{...options,cache:"no-store",headers:{"Accept":"application/json",...(options.body?{"Content-Type":"application/json"}:{})},signal:c.signal});const v=await r.json();if(!r.ok||v.ok!==true)throw new Error(v.error||("HTTP "+r.status));return v}finally{clearTimeout(t)}}
+function showMessage(target,text,ok){target.textContent=text;target.className="message "+(ok?"ok":"error")}
+function message(text,ok){showMessage(el("message"),text,ok)}
+async function request(url,options={},timeoutMs=5000){const c=new AbortController(),t=setTimeout(()=>c.abort(),timeoutMs);try{const r=await fetch(url,{...options,cache:"no-store",headers:{"Accept":"application/json",...(options.body?{"Content-Type":"application/json"}:{})},signal:c.signal});const v=await r.json();if(!r.ok||v.ok!==true)throw new Error(v.error||("HTTP "+r.status));return v}finally{clearTimeout(t)}}
 function alarmText(a){const selected=[];for(let bit=0;bit<7;bit++)if(a.weekday_mask&(1<<bit))selected.push(days[bit]);return String(a.hour).padStart(2,"0")+":"+String(a.minute).padStart(2,"0")+" · "+selected.join("、")+" · "+(a.repeat?"重复":"单次")+" · "+(a.enabled?"启用":"停用")}
-function render(v,updateForm=false){const a=v.alarm,summary=alarmText(a);el("clock").textContent=v.clock_synced?new Date(v.epoch_seconds*1000).toLocaleString():"等待手机同步";el("synced").textContent=v.clock_synced?"已同步":"未同步";el("synced").className="value "+(v.clock_synced?"good":"alert");el("summary").textContent=summary;el("ringing").textContent=v.ringing?"正在响铃":"待机";el("ringing").className="value "+(v.ringing?"alert":"good");if(updateForm){el("time").value=String(a.hour).padStart(2,"0")+":"+String(a.minute).padStart(2,"0");document.querySelectorAll("[name=day]").forEach(x=>x.checked=Boolean(a.weekday_mask&(1<<Number(x.value))));el("repeat").checked=a.repeat;el("enabled").checked=a.enabled}}
+function deviceTimeText(epochSeconds,utcOffsetMinutes){const d=new Date((epochSeconds+utcOffsetMinutes*60)*1000),p=n=>String(n).padStart(2,"0");return d.getUTCFullYear()+"-"+p(d.getUTCMonth()+1)+"-"+p(d.getUTCDate())+" "+p(d.getUTCHours())+":"+p(d.getUTCMinutes())+":"+p(d.getUTCSeconds())}
+function render(v,updateForm=false){const a=v.alarm,summary=alarmText(a);el("clock").textContent=v.clock_synced?deviceTimeText(v.epoch_seconds,v.utc_offset_minutes):"等待网络校时";el("synced").textContent=v.clock_synced?"网络已同步":"未同步";el("synced").className="value "+(v.clock_synced?"good":"alert");el("summary").textContent=summary;el("ringing").textContent=v.ringing?"正在响铃":"待机";el("ringing").className="value "+(v.ringing?"alert":"good");if(updateForm){el("time").value=String(a.hour).padStart(2,"0")+":"+String(a.minute).padStart(2,"0");document.querySelectorAll("[name=day]").forEach(x=>x.checked=Boolean(a.weekday_mask&(1<<Number(x.value))));el("repeat").checked=a.repeat;el("enabled").checked=a.enabled}}
 const delay=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
 async function status(){return request(api.status)}
 async function pollStatusUntil(predicate,failure){let latest;for(let attempt=0;attempt<10;attempt++){latest=await status();if(predicate(latest))return latest;if(attempt<9)await delay(200)}throw new Error(failure)}
 async function load(updateForm=false){try{render(await status(),updateForm)}catch(e){message("读取失败："+e.message,false)}}
-async function syncClock(show=true){const d=new Date(),payload={epoch_seconds:Math.floor(d.getTime()/1000),utc_offset_minutes:-d.getTimezoneOffset()};el("sync").disabled=true;try{await request(api.sync,{method:"POST",body:JSON.stringify(payload)});const v=await pollStatusUntil(x=>x.clock_synced&&x.utc_offset_minutes===payload.utc_offset_minutes,"设备未在限定时间内完成时钟同步");render(v,false);if(show)message("时间同步成功",true)}catch(e){if(show)message("时间同步失败："+e.message,false)}finally{el("sync").disabled=false}}
+function renderNetwork(v,updateForm=false){el("network-ssid-state").textContent=v.configured?v.ssid:"未配置";const text=v.provisioning?"正在验证":(v.connected?"已连接":(v.configured?"等待连接":"仅设备热点"));el("network-link-state").textContent=text;el("network-link-state").className="value "+(v.connected?"good":(v.provisioning?"":"alert"));if(updateForm&&v.configured)el("network-ssid").value=v.ssid}
+async function loadNetwork(updateForm=false){try{const v=await request(api.networkStatus);renderNetwork(v,updateForm);return v}catch(e){showMessage(el("network-message"),"网络状态读取失败："+e.message,false);throw e}}
+function networkFailureText(v){const reason=v.disconnect_reason?"（Wi-Fi 原因码 "+v.disconnect_reason+"）":"";if(v.result==="storage_failed")return "连接成功，但 NVS 保存失败，已恢复原网络";return "连接失败，已恢复原网络"+reason}
+async function waitNetworkResult(){let lastError;for(let attempt=0;attempt<40;attempt++){try{const v=await request(api.networkStatus,{},2500);renderNetwork(v,false);if(v.result==="success"&&v.connected)return v;if(v.result==="failed"||v.result==="storage_failed")throw new Error(networkFailureText(v));lastError=undefined}catch(e){lastError=e;if(String(e.message).startsWith("连接失败")||String(e.message).startsWith("连接成功"))throw e}await delay(750)}throw lastError||new Error("连接验证超时，请确认手机仍连接设备热点")}
+function renderScanResults(networks){const list=el("network-list");list.replaceChildren(new Option("手动输入网络名称",""));const seen=new Set();for(const network of networks){if(!network.ssid||seen.has(network.ssid))continue;seen.add(network.ssid);const lock=network.authmode===0?"开放":"加密";const option=new Option(network.ssid+" · "+network.rssi+" dBm · "+lock,network.ssid);option.dataset.authmode=String(network.authmode);list.add(option)}if(list.options.length===1)showMessage(el("network-message"),"未发现可显示的网络，可以手动输入 SSID",false);else showMessage(el("network-message"),"扫描完成，共 "+(list.options.length-1)+" 个网络",true)}
+async function waitScanResult(){for(let attempt=0;attempt<30;attempt++){const v=await request(api.networkScan,{},3000);if(!v.scanning){renderScanResults(v.networks||[]);return}await delay(500)}throw new Error("扫描超时")}
 el("form").onsubmit=async e=>{e.preventDefault();const p=el("time").value.split(":");let mask=0;document.querySelectorAll("[name=day]:checked").forEach(x=>mask|=1<<Number(x.value));if(el("enabled").checked&&mask===0){message("启用闹钟时至少选择一天",false);return}const payload={schedule_id:0,hour:Number(p[0]),minute:Number(p[1]),weekday_mask:mask,repeat:el("repeat").checked,enabled:el("enabled").checked};el("save").disabled=true;try{await request(api.alarm,{method:"PUT",body:JSON.stringify(payload)});const v=await pollStatusUntil(x=>Object.keys(payload).every(key=>x.alarm[key]===payload[key]),"设备回读参数与提交内容不一致");render(v,true);message("闹钟已保存并写入掉电存储",true)}catch(err){message("保存失败："+err.message,false)}finally{el("save").disabled=false}};
-el("sync").onclick=()=>syncClock(true);el("stop").onclick=async()=>{el("stop").disabled=true;try{await request(api.stop,{method:"POST"});const v=await pollStatusUntil(x=>!x.ringing,"设备未在限定时间内停止本次响铃");render(v,false);message("已停止本次响铃",true)}catch(e){message("停止失败："+e.message,false)}finally{el("stop").disabled=false}};
-(async()=>{await syncClock(false);await load(true);setInterval(()=>load(false),3000)})();
+el("stop").onclick=async()=>{el("stop").disabled=true;try{await request(api.stop,{method:"POST"});const v=await pollStatusUntil(x=>!x.ringing,"设备未在限定时间内停止本次响铃");render(v,false);message("已停止本次响铃",true)}catch(e){message("停止失败："+e.message,false)}finally{el("stop").disabled=false}};
+el("network-list").onchange=e=>{if(e.target.value)el("network-ssid").value=e.target.value;const option=e.target.selectedOptions[0];if(option&&option.dataset.authmode==="0")el("network-password").value=""};
+el("network-show-password").onchange=e=>{el("network-password").type=e.target.checked?"text":"password"};
+el("network-scan").onclick=async()=>{el("network-scan").disabled=true;showMessage(el("network-message"),"正在扫描附近网络…",true);try{await request(api.networkScan,{method:"POST"});await waitScanResult()}catch(e){showMessage(el("network-message"),"扫描失败："+e.message,false)}finally{el("network-scan").disabled=false}};
+el("network-form").onsubmit=async e=>{e.preventDefault();const ssid=el("network-ssid").value.trim(),password=el("network-password").value,ssidBytes=new TextEncoder().encode(ssid).length;if(ssidBytes<1||ssidBytes>32){showMessage(el("network-message"),"SSID 必须为 1–32 字节",false);return}if(password.length!==0&&(password.length<8||password.length>63||!/^[\x20-\x7e]+$/.test(password))){showMessage(el("network-message"),"密码必须为空或 8–63 位可打印 ASCII 字符",false);return}el("network-save").disabled=true;el("network-clear").disabled=true;showMessage(el("network-message"),"正在试连；取得 IP 后才会写入 NVS…",true);try{try{await request(api.networkConfig,{method:"PUT",body:JSON.stringify({ssid,password})},6000)}catch(e){await delay(1000)}const v=await waitNetworkResult();el("network-password").value="";renderNetwork(v,true);showMessage(el("network-message"),"连接成功，配置已保存到 NVS",true)}catch(e){showMessage(el("network-message"),e.message,false)}finally{el("network-save").disabled=false;el("network-clear").disabled=false}};
+el("network-clear").onclick=async()=>{if(!confirm("清除上游 Wi-Fi 配置？闹钟计划不会被删除。"))return;el("network-clear").disabled=true;try{await request(api.networkConfig,{method:"DELETE"});el("network-ssid").value="";el("network-password").value="";renderNetwork(await request(api.networkStatus),true);showMessage(el("network-message"),"上游网络配置已清除并写入 NVS",true)}catch(e){showMessage(el("network-message"),"清除失败："+e.message,false)}finally{el("network-clear").disabled=false}};
+(async()=>{await Promise.allSettled([load(true),loadNetwork(true)]);setInterval(()=>{load(false);loadNetwork(false).catch(()=>{})},3000)})();
 </script>
 </body>
 </html>

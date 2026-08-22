@@ -1,26 +1,29 @@
 #include <inttypes.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
 
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_netif_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "wifi_alarm_portal.h"
+#include "alarm_car_controller.h"
 
 #define ALARM_SCHEDULE_ID                 0U
 #define ALARM_COMMAND_QUEUE_LENGTH        4U
 #define ALARM_SCHEDULER_TASK_PRIORITY     5U
+#define NETWORK_TIME_TASK_PRIORITY        3U
 #define ALARM_CHECK_PERIOD_MS             1000U
 #define ALARM_STATE_LOCK_TIMEOUT_MS       50U
 #define MIN_VALID_EPOCH_SECONDS           INT64_C(1577836800)
-#define MIN_UTC_OFFSET_MINUTES            (-720)
-#define MAX_UTC_OFFSET_MINUTES            840
 #define VALID_WEEKDAY_MASK                UINT8_C(0x7F)
 #define INVALID_LOCAL_MINUTE_KEY          INT64_MIN
 
@@ -55,6 +58,17 @@ static const char *TAG = "alarm_car";
 
 static QueueHandle_t s_command_queue;
 static SemaphoreHandle_t s_state_mutex;
+static TaskHandle_t s_scheduler_task;
+static atomic_bool s_stop_requested;
+
+static void log_heap_status(const char *phase)
+{
+    ESP_LOGI(TAG,
+             "HEAP_STATUS: phase=%s free_8bit=%u min_free_8bit=%u",
+             phase,
+             (unsigned int)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             (unsigned int)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT));
+}
 static AlarmSchedulerState s_state;
 
 /*
@@ -63,6 +77,11 @@ static AlarmSchedulerState s_state;
  * not call back into the portal synchronously.
  */
 __attribute__((weak)) void alarm_car_on_alarm_triggered(uint8_t schedule_id)
+{
+    (void)schedule_id;
+}
+
+__attribute__((weak)) void alarm_car_on_alarm_stopped(uint8_t schedule_id)
 {
     (void)schedule_id;
 }
@@ -117,6 +136,20 @@ static esp_err_t enqueue_alarm_command(const AlarmCommand *command)
         return ESP_ERR_TIMEOUT;
     }
 
+    if (s_scheduler_task != NULL) {
+        xTaskNotifyGive(s_scheduler_task);
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t alarm_car_request_stop(void)
+{
+    if (s_scheduler_task == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    atomic_store(&s_stop_requested, true);
+    xTaskNotifyGive(s_scheduler_task);
     return ESP_OK;
 }
 
@@ -142,22 +175,11 @@ static esp_err_t portal_event_callback(const WifiAlarmPortalEvent *event,
         break;
 
     case WIFI_ALARM_PORTAL_EVENT_TIME_SYNC:
-        if (event->data.time_sync.epoch_seconds < MIN_VALID_EPOCH_SECONDS ||
-            event->data.time_sync.utc_offset_minutes < MIN_UTC_OFFSET_MINUTES ||
-            event->data.time_sync.utc_offset_minutes > MAX_UTC_OFFSET_MINUTES) {
-            return ESP_ERR_INVALID_ARG;
-        }
-
-        command.type = ALARM_COMMAND_SYNC_TIME;
-        command.data.time_sync.epoch_seconds =
-            event->data.time_sync.epoch_seconds;
-        command.data.time_sync.utc_offset_minutes =
-            event->data.time_sync.utc_offset_minutes;
-        break;
+        ESP_LOGW(TAG, "phone HTTP time sync is disabled; SNTP is authoritative");
+        return ESP_ERR_NOT_SUPPORTED;
 
     case WIFI_ALARM_PORTAL_EVENT_STOP_CURRENT_RINGING:
-        command.type = ALARM_COMMAND_STOP_CURRENT_RINGING;
-        break;
+        return alarm_car_request_stop();
 
     default:
         return ESP_ERR_NOT_SUPPORTED;
@@ -221,7 +243,8 @@ static esp_err_t apply_time_sync(int64_t epoch_seconds,
     xSemaphoreGive(s_state_mutex);
 
     ESP_LOGI(TAG,
-             "TIME_SYNCED: epoch_seconds=%" PRId64 " utc_offset_minutes=%d",
+             "TIME_SYNCED: source=sntp epoch_seconds=%" PRId64
+             " utc_offset_minutes=%d",
              epoch_seconds,
              (int)utc_offset_minutes);
     return ESP_OK;
@@ -351,6 +374,13 @@ static void check_alarm_trigger(void)
 
     alarm_car_on_alarm_triggered(config_snapshot.schedule_id);
 
+    esp_err_t wifi_err = wifi_alarm_portal_suspend_sta();
+    if (wifi_err != ESP_OK && wifi_err != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "station suspend failed: %s",
+                 esp_err_to_name(wifi_err));
+    }
+    log_heap_status("alarm_ap_only");
+
     if (!config_snapshot.repeat) {
         persist_one_shot_disable(&config_snapshot);
     }
@@ -395,6 +425,13 @@ static void process_alarm_command(const AlarmCommand *command)
 
         s_state.ringing = false;
         xSemaphoreGive(s_state_mutex);
+        alarm_car_on_alarm_stopped(ALARM_SCHEDULE_ID);
+        err = wifi_alarm_portal_resume_sta();
+        if (err != ESP_OK && err != ESP_ERR_NOT_SUPPORTED) {
+            ESP_LOGW(TAG, "station resume failed: %s",
+                     esp_err_to_name(err));
+        }
+        log_heap_status("alarm_stopped_apsta");
         ESP_LOGI(TAG,
                  "ALARM_RINGING_STOPPED: schedule_id=%u",
                  ALARM_SCHEDULE_ID);
@@ -408,18 +445,100 @@ static void process_alarm_command(const AlarmCommand *command)
 
 static void alarm_scheduler_task(void *argument)
 {
-    TickType_t next_wake = xTaskGetTickCount();
     AlarmCommand command;
 
     (void)argument;
 
     for (;;) {
+        if (atomic_exchange(&s_stop_requested, false)) {
+            const AlarmCommand stop_command = {
+                .type = ALARM_COMMAND_STOP_CURRENT_RINGING,
+            };
+            process_alarm_command(&stop_command);
+        }
         while (xQueueReceive(s_command_queue, &command, 0U) == pdPASS) {
             process_alarm_command(&command);
         }
-
         check_alarm_trigger();
-        vTaskDelayUntil(&next_wake, pdMS_TO_TICKS(ALARM_CHECK_PERIOD_MS));
+        (void)ulTaskNotifyTake(pdTRUE,
+                               pdMS_TO_TICKS(ALARM_CHECK_PERIOD_MS));
+    }
+}
+
+static void network_time_task(void *argument)
+{
+    (void)argument;
+
+    for (;;) {
+        esp_err_t err = wifi_alarm_portal_wait_for_sta_ip(
+            CONFIG_ALARM_CAR_STA_IP_WAIT_TIMEOUT_MS);
+        if (err != ESP_OK) {
+            if (err == ESP_ERR_NOT_SUPPORTED) {
+                /* The portal may be provisioned from the web UI after boot.
+                 * Keep the task alive so a later GOT_IP is calibrated without
+                 * requiring a reboot or build-time STA credentials. */
+                vTaskDelay(pdMS_TO_TICKS(1000U));
+                continue;
+            }
+            ESP_LOGW(TAG, "station IP wait failed: %s; retrying later",
+                     esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_ALARM_CAR_SNTP_RETRY_INTERVAL_MS));
+            err = wifi_alarm_portal_reconnect_sta();
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "station reconnect failed: %s",
+                         esp_err_to_name(err));
+            }
+            continue;
+        }
+
+        esp_sntp_config_t sntp_config =
+            ESP_NETIF_SNTP_DEFAULT_CONFIG(CONFIG_ALARM_CAR_SNTP_SERVER);
+        err = esp_netif_sntp_init(&sntp_config);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "SNTP initialization failed: %s",
+                     esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_ALARM_CAR_SNTP_RETRY_INTERVAL_MS));
+            continue;
+        }
+
+        err = esp_netif_sntp_sync_wait(
+            pdMS_TO_TICKS(CONFIG_ALARM_CAR_SNTP_SYNC_TIMEOUT_MS));
+        if (err == ESP_OK) {
+            const time_t now = time(NULL);
+            AlarmCommand command = {
+                .type = ALARM_COMMAND_SYNC_TIME,
+                .data.time_sync = {
+                    .epoch_seconds = (int64_t)now,
+                    .utc_offset_minutes = CONFIG_ALARM_CAR_UTC_OFFSET_MINUTES,
+                },
+            };
+
+            if ((int64_t)now >= MIN_VALID_EPOCH_SECONDS) {
+                err = enqueue_alarm_command(&command);
+            } else {
+                err = ESP_ERR_INVALID_RESPONSE;
+            }
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG,
+                         "SNTP sample accepted; session closed until next period");
+                ESP_LOGI(TAG,
+                         "NETWORK_TIME_STACK: high_watermark=%u",
+                         (unsigned int)uxTaskGetStackHighWaterMark(NULL));
+                log_heap_status("sntp_before_deinit");
+                esp_netif_sntp_deinit();
+                log_heap_status("sntp_after_deinit");
+                vTaskDelay(pdMS_TO_TICKS(
+                    CONFIG_ALARM_CAR_SNTP_CALIBRATION_PERIOD_SECONDS * 1000U));
+                continue;
+            }
+            ESP_LOGE(TAG, "SNTP sample enqueue failed: %s",
+                     esp_err_to_name(err));
+        } else {
+            ESP_LOGW(TAG, "SNTP sync timed out: %s", esp_err_to_name(err));
+        }
+
+        esp_netif_sntp_deinit();
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_ALARM_CAR_SNTP_RETRY_INTERVAL_MS));
     }
 }
 
@@ -452,6 +571,9 @@ void app_main(void)
     const WifiAlarmPortalOptions options = {
         .ap_ssid = CONFIG_ALARM_CAR_PORTAL_AP_SSID,
         .ap_password = CONFIG_ALARM_CAR_PORTAL_AP_PASSWORD,
+        .sta_ssid = CONFIG_ALARM_CAR_STA_SSID,
+        .sta_password = CONFIG_ALARM_CAR_STA_PASSWORD,
+        .sta_maximum_retries = CONFIG_ALARM_CAR_STA_MAXIMUM_RETRIES,
         .max_connections = CONFIG_ALARM_CAR_PORTAL_MAX_CONNECTIONS,
         .apply_callback = NULL,
         .event_callback = portal_event_callback,
@@ -474,6 +596,7 @@ void app_main(void)
     s_state.last_triggered_local_minute = INVALID_LOCAL_MINUTE_KEY;
     s_state.clock_synced = false;
     s_state.ringing = false;
+    atomic_init(&s_stop_requested, false);
 
     err = wifi_alarm_portal_start(&options);
     if (err != ESP_OK) {
@@ -498,15 +621,32 @@ void app_main(void)
                               CONFIG_ALARM_CAR_SCHEDULER_TASK_STACK_SIZE,
                               NULL,
                               ALARM_SCHEDULER_TASK_PRIORITY,
-                              NULL);
+                              &s_scheduler_task);
     if (task_result != pdPASS) {
         ESP_LOGE(TAG, "failed to create alarm scheduler task");
         cleanup_startup_failure(true);
         return;
     }
+    log_heap_status("portal_started");
+
+    task_result = xTaskCreate(network_time_task,
+                              "network_time",
+                              CONFIG_ALARM_CAR_NETWORK_TIME_TASK_STACK_SIZE,
+                              NULL,
+                              NETWORK_TIME_TASK_PRIORITY,
+                              NULL);
+    if (task_result != pdPASS) {
+        ESP_LOGE(TAG,
+                 "failed to create network time task; clock remains unsynchronized");
+    }
 
     ESP_LOGI(TAG,
              "alarm portal ready: ssid=%s url=http://192.168.4.1",
              options.ap_ssid);
-    ESP_LOGI(TAG, "waiting for phone TIME_SYNC before alarm scheduling");
+    if (CONFIG_ALARM_CAR_STA_SSID[0] == '\0') {
+        ESP_LOGI(TAG,
+                 "station uplink not configured at boot; waiting for web provisioning before SNTP");
+    } else {
+        ESP_LOGI(TAG, "waiting for SNTP time synchronization");
+    }
 }
