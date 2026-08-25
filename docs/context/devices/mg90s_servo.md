@@ -17,6 +17,7 @@ device_semantics:
     - set_position: compatibility command in 0, 45, 90, 135, or 180 degrees
   data_conversion:
     - integer angles use piecewise-linear pulse interpolation between configurable 0,45,90,135,180-degree calibration points
+    - current default calibration maps 0,45,90,135,180 degrees to 500,1000,1500,2000,2500 us
 capabilities:
   - command any integer target angle from 0 through 180 degrees
   - command one selected channel or all configured channels

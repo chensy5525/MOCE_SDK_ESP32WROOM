@@ -21,21 +21,22 @@ driver interpolates pulse width between five configurable calibration points:
 
 | Command | Default pulse width |
 |---:|---:|
-| 0 degrees | 1000 us |
-| 45 degrees | 1250 us |
+| 0 degrees | 500 us |
+| 45 degrees | 1000 us |
 | 90 degrees | 1500 us |
-| 135 degrees | 1750 us |
-| 180 degrees | 2000 us |
+| 135 degrees | 2000 us |
+| 180 degrees | 2500 us |
 
-For example, the default calibration maps 17 degrees to approximately 1094 us.
+For example, the default calibration maps 17 degrees to approximately 689 us.
 The original five-position API remains as a compatibility wrapper; it is no
 longer the primary command contract.
 
 PWM frequency is fixed at 50 Hz. Pulse widths are configurable because real
 mechanical angle depends on the servo, supply, load, linkage, and calibration.
-The driver accepts only the conservative 1000 us to 2000 us command envelope;
-values outside that envelope are rejected before LEDC is configured. This is a
-software guardrail, not calibrated angle or stall-current evidence.
+The MG90S nominal profile uses a 500 us to 2500 us command envelope. Values
+outside that envelope are rejected before LEDC is configured. This is a
+software guardrail, not calibrated angle or stall-current evidence; the caller
+may override the five calibration points for the actual servo and mechanism.
 `servo_driver_get_commanded_angle()` returns the last accepted command; it is
 not position feedback. `servo_driver_get_commanded_position()` succeeds only
 when that command exactly matches one of the original five position tokens.

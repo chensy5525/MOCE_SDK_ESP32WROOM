@@ -23,17 +23,17 @@ source_paths:
     - docs/context/recipes/mg90s_one_shot_five_position_test.md
 build:
   command: .\tools\build.ps1 examples_direct/servo_direct_test esp32 my_board_esp32wroom
-  verification_command: . E:\Espressif\frameworks\esp-idf-v6.0.2\export.ps1; idf.py -C D:\Desktop\Firmware\ESP\zsan\examples_direct\servo_direct_test -B D:\Desktop\Firmware\ESP\zsan\build_arbitrary_angle_20260820 build
+  verification_command: . E:\Espressif\frameworks\esp-idf-v6.0.2\export.ps1; idf.py --no-ccache -C D:\Desktop\Firmware\ESP\zsan\examples_direct\servo_direct_test -B D:\Desktop\MOCE_Firmware_Workspace\servo_direct_test_commit_review -DMOCE_BOARD=my_board_esp32wroom -DSDKCONFIG_DEFAULTS=D:\Desktop\Firmware\ESP\zsan\boards\my_board_esp32wroom\sdkconfig.defaults build
   status: compile_passed
   toolchain: ESP-IDF 6.0.2 from E:\Espressif\frameworks\esp-idf-v6.0.2
   repository_toolchain_status: third_party/esp-idf/export.ps1 missing; repository submodule unavailable
-  last_verified: 2026-08-20
+  last_verified: 2026-08-25
   artifacts:
-    - build_arbitrary_angle_20260820/servo_direct_test.bin
-    - build_arbitrary_angle_20260820/servo_direct_test.elf
-    - build_arbitrary_angle_20260820/servo_direct_test.map
+    - D:\Desktop\MOCE_Firmware_Workspace\servo_direct_test_commit_review\servo_direct_test.bin
+    - D:\Desktop\MOCE_Firmware_Workspace\servo_direct_test_commit_review\servo_direct_test.elf
+    - D:\Desktop\MOCE_Firmware_Workspace\servo_direct_test_commit_review\servo_direct_test.map
   size:
-    app_binary_bytes: 156112
+    app_binary_bytes: 156128
     app_partition_free_percent: 85
 hardware_tests:
   bench_status: untested
@@ -56,12 +56,17 @@ expected_behavior:
   - both servos respond to non-45-degree target commands
   - PWM pulse width increases monotonically with the commanded integer angle
   - both servos return to the nominal 90-degree command and stop switching
+configured_calibration:
+  profile_us: [500, 1000, 1500, 2000, 2500]
+  target_angles_deg: [0, 45, 90, 135, 180]
+  evidence_status: configured_and_compile_tested_only
 failure_behavior:
   - configuration or PWM errors abort the finite sequence
   - a failure on either channel triggers the nominal 90-degree safe command for both channels
   - the recipe disables both PWM outputs if the group safe-position command fails
 known_limits:
   - the dual-channel source has not been flashed or observed on hardware
+  - the expanded 500-to-2500-us endpoint range has not been verified by waveform or dual-servo motion testing
   - calibration pulse targets and interpolated values are configuration results, not calibrated mechanical-angle evidence
   - serial logs prove command execution but not waveform, motion, or position accuracy
   - simultaneous two-servo supply current capability and long-duration stability are not verified

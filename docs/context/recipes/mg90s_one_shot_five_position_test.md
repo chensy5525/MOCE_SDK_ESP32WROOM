@@ -38,7 +38,7 @@ serial_log:
   - recipe=mg90s_dual_arbitrary_angle_test
   - selected_devices=mg90s_servo instances=2
   - transport=esp32_native_pwm pwm1_gpio=32 pwm2_gpio=33 frequency=50Hz
-  - position=<0|45|90|135|180|135|90> commanded on both channels; observe both servos
+  - angle=<0|17|63|91|127|180|90> commanded on both channels; observe both servos
   - test complete; both final commands=90; no further switching
 state_machine:
   - INIT

@@ -13,13 +13,13 @@ extern "C" {
 
 #define SERVO_DRIVER_MAX_CHANNELS          4U
 #define SERVO_DRIVER_PWM_FREQUENCY_HZ      50U
-#define SERVO_DRIVER_DEFAULT_0_PULSE_US    1000U
-#define SERVO_DRIVER_DEFAULT_45_PULSE_US   1250U
+#define SERVO_DRIVER_DEFAULT_0_PULSE_US    500U
+#define SERVO_DRIVER_DEFAULT_45_PULSE_US   1000U
 #define SERVO_DRIVER_DEFAULT_90_PULSE_US   1500U
-#define SERVO_DRIVER_DEFAULT_135_PULSE_US  1750U
-#define SERVO_DRIVER_DEFAULT_180_PULSE_US  2000U
-#define SERVO_DRIVER_MIN_PULSE_US          1000U
-#define SERVO_DRIVER_MAX_PULSE_US          2000U
+#define SERVO_DRIVER_DEFAULT_135_PULSE_US  2000U
+#define SERVO_DRIVER_DEFAULT_180_PULSE_US  2500U
+#define SERVO_DRIVER_MIN_PULSE_US          500U
+#define SERVO_DRIVER_MAX_PULSE_US          2500U
 #define SERVO_DRIVER_MIN_ANGLE_DEG          0U
 #define SERVO_DRIVER_MAX_ANGLE_DEG          180U
 #define SERVO_DRIVER_INITIALIZER            {0}
@@ -61,7 +61,7 @@ typedef struct {
     bool cleanup_required;
 } ServoDriver;
 
-/** Populate conservative MG90S nominal defaults with no resource bindings. */
+/** Populate MG90S nominal 500..2500 us defaults with no resource bindings. */
 esp_err_t servo_driver_config_default(ServoDriverConfig *config);
 
 /**

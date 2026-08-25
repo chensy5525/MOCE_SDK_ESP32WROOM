@@ -11,7 +11,7 @@ ESP32-WROOM board.
 - Both channels use the shared 50 Hz timer at 16-bit resolution.
 - PWM: 50 Hz.
 - Calibration targets: 0/45/90/135/180 degrees map to
-  1000/1250/1500/1750/2000 us.
+  500/1000/1500/2000/2500 us.
 - Intermediate integer angles use piecewise-linear interpolation.
 
 The sequence is:
