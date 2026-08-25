@@ -16,7 +16,7 @@ E104-BT01 CN1.4 GND    -> ESP32 GND
 在已初始化 ESP-IDF 环境的 PowerShell 中执行：
 
 ```powershell
-idf.py -C 'C:\Users\LENOVO\Desktop\Firmware\ESP\zsan\examples_direct\e104_bt01_direct_uart_test' build
+idf.py -C 'D:\Desktop\Firmware\ESP\zsan\examples_direct\e104_bt01_direct_uart_test' build
 ```
 
 例程先发送不带 CR/LF 的 `AT` 和 `AT+BAUD?`。探测通过后，用手机连接 `E104-BT01`：
